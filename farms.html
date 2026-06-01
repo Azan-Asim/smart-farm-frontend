@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+<title>Farms - Smart Farm Marketplace</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+
+<body>
+
+<header>
+
+<div class="logo">
+Smart Farm Marketplace
+</div>
+
+<nav>
+<a href="index.html">Home</a>
+<a href="farms.html">Farms</a>
+<a href="login.html">Login</a>
+<a href="register.html">Register</a>
+<a href="cart.html">Cart</a>
+</nav>
+
+</header>
+
+<section class="farms-page">
+
+<h1>Our Partner Farms</h1>
+
+<section class="search-container">
+    <div class="search-box">
+        <input 
+            type="text" 
+            id="searchInput" 
+            placeholder="Search farms or products..."
+            onkeyup="searchItems()"
+        >
+        <button class="search-btn" onclick="searchItems()"><i class="fas fa-search"></i> Search</button>
+    </div>
+
+    <div class="filters-wrapper">
+        <button class="filter-chip active" onclick="filterCategory('all')">All</button>
+        <button class="filter-chip" onclick="filterCategory('vegetables')">Vegetables</button>
+        <button class="filter-chip" onclick="filterCategory('fruits')">Fruits</button>
+        <button class="filter-chip" onclick="filterCategory('dairy')">Dairy</button>
+        <button class="filter-chip" onclick="filterCategory('Grains')">Grains</button>
+        <button class="filter-chip" onclick="filterCategory('Sea Food')">Sea food</button>
+    </div>
+</section>
+
+<div class="farms-grid">
+
+<!-- FARM 1 -->
+
+<div class="farm-card" data-category="vegetables">
+
+<img src="images/farm1.jpg">
+
+<h3>Green Valley Farm</h3>
+
+<p>Organic vegetables</p>
+
+<a href="farm1.html">
+<button>View Products</button>
+
+</a>
+
+</div>
+
+
+<!-- FARM 2 -->
+
+<div class="farm-card" data-category="dairy">
+<img src="images/farm2.jpg">
+
+<h3>Sunrise Poultry Farm</h3>
+
+<p>Fresh Eggs and Chicken</p>
+
+<a href="farm2.html">
+<button>View Products</button>
+</a>
+
+</div>
+
+
+<!-- FARM 3 -->
+
+<div class="farm-card" data-category="Grains">
+<img src="images/farm3.jpg">
+
+<h3>Golden Wheat Acres</h3>
+
+<p>Organic Grains</p>
+
+<a href="farm3.html">
+<button>View Products</button>
+</a>
+
+</div>
+<!-- FARM 4 -->
+
+<div class="farm-card" data-category="dairy">
+<img src="images/farm4.jpg">
+
+<h3>Mountain View Dairy</h3>
+
+<p>Dairy and fresh farm products</p>
+
+<a href="farm4.html">
+<button>View Products</button>
+</a>
+
+</div>
+</div>
+
+<div class="farms-grid">
+
+<!-- FARM 5 -->
+
+<div class="farm-card" data-category="fruits">
+<img src="images/farm5.jpg">
+
+<h3>Organic Blossom Grove</h3>
+
+<p>Fresh fruits</p>
+
+<a href="farm5.html">
+<button>View Products</button>
+</a>
+
+</div>
+
+
+<!-- FARM 6 -->
+
+<div class="farm-card" data-category="vegetables">
+<img src="images/farm6.jpg">
+
+<h3>Dessert Bloom Hydroponics </h3>
+
+<p>Fresh Vegetables</p>
+
+<a href="farm6.html">
+<button>View Products</button>
+</a>
+
+</div>
+
+
+<!-- FARM 7 -->
+
+<div class="farm-card" data-category="Sea food">
+<img src="images/farm7.jpg">
+
+<h3>Pure Stream Fish Farm</h3>
+
+<p>Fresh Sea Food</p>
+
+<a href="farm7.html">
+<button>View Products</button>
+</a>
+
+</div>
+<!-- FARM 8 -->
+
+<div class="farm-card" data-category="spices">
+<img src="images/farm8.jpg">
+
+<h3>Emerald Spice Plantation</h3>
+
+<p>Organic Spices</p>
+
+<a href="farm8.html">
+<button>View Products</button>
+</a>
+
+</div>
+
+
+</section>
+<footer class="footer">
+
+<div class="footer-container">
+
+<div class="footer-section">
+<h3>Smart Farm Marketplace</h3>
+<p>Connecting farmers and buyers for fresh and organic farm products.</p>
+</div>
+
+<div class="footer-section">
+<h3>Quick Links</h3>
+<a href="index.html">Home</a><br>
+<a href="farms.html">Farms</a><br>
+<a href="login.html">Login</a><br>
+<a href="register.html">Register</a>
+</div>
+
+<div class="footer-section">
+<h3>Contact</h3>
+<p>Email: smartfarm@gmail.com</p>
+<p>Phone: +92 300 1234567</p>
+<p>Location: Lahore, Pakistan</p>
+</div>
+
+</div>
+
+<p class="copyright">
+© 2026 Smart Farm Marketplace | All Rights Reserved
+</p>
+
+</footer>
+<script src="js/script.js"></script>
+</body>
+
+</html>

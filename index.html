@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+<title>Smart Farm Marketplace</title>
+
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+
+</head>
+
+<body>
+
+<!-- NAVBAR -->
+
+<header>
+
+<div class="logo">
+Smart Farm Marketplace
+</div>
+
+<nav>
+
+<a href="index.html">Home</a>
+<a href="farms.html">Farms</a>
+<a href="login.html">Login</a>
+<a href="register.html">Register</a>
+<a href="create-farm.html">Create Farm</a>
+<a href="pesticides.html">Pesticides</a>
+<a href="cart.html">
+🛒 Cart (<span id="cart-count">0</span>)
+</a>
+</nav>
+
+</header>
+
+
+<!-- HERO SECTION -->
+<section class="hero-section">
+    <div class="slide active" style="background-image: url('images/farm.jpg');"></div>
+    <div class="slide" style="background-image: url('images/farm2.jpg');"></div>
+    <div class="slide" style="background-image: url('images/farm3.jpg');"></div>
+
+    <div class="hero-content">
+        <h1>Buy Fresh Products <br> Directly From Farmers</h1>
+        <p>Connecting farmers and buyers in one platform</p>
+        <a href="farms.html" class="explore-btn">Explore Farms</a>
+    </div>
+
+    <div class="carousel-indicators">
+        <span class="dot active" onclick="currentSlide(0)"></span>
+        <span class="dot" onclick="currentSlide(1)"></span>
+        <span class="dot" onclick="currentSlide(2)"></span>
+    </div>
+</section>
+
+<section class="features-section">
+    <div class="container">
+        <div class="feature-card">
+            <div class="feature-icon">
+                <i class="fas fa-leaf"></i> </div>
+            <h3>Fresh and Organic</h3>
+            <p>From gourmet to farm-to-table, our organic selection ensures the highest quality.</p>
+        </div>
+
+        <div class="feature-card">
+            <div class="feature-icon">
+                <i class="fas fa-hands-helping"></i>
+            </div>
+            <h3>Direct From Farmers</h3>
+            <p>Freshly picked and delivered, supporting local agriculture directly.</p>
+        </div>
+
+        <div class="feature-card">
+            <div class="feature-icon">
+                <i class="fas fa-shield-alt"></i>
+            </div>
+            <h3>Secure Transactions</h3>
+            <p>Your payments are safe and encrypted with our secure gateway.</p>
+        </div>
+    </div>
+</section>
+
+
+<!-- FEATURED PRODUCTS -->
+
+<section class="top-farms">
+
+<h2>Top Farms</h2>
+
+<div class="farms-container">
+
+<!-- FARM 1 -->
+
+<div class="farm-card">
+
+<img src="images/farm1.jpg">
+
+<h3>Green Valley Organics</h3>
+
+<p>Organic vegetables</p>
+
+<a href="farm1.html">
+<button>View Products</button>
+</a>
+
+</div>
+
+
+<!-- FARM 2 -->
+
+<div class="farm-card">
+
+<img src="images/farm2.jpg">
+
+<h3>Sunrise Poultry Farm</h3>
+
+<p>Fresh Eggs and Chicken</p>
+
+<a href="farm2.html">
+<button>View Products</button>
+</a>
+
+</div>
+
+
+<!-- FARM 3 -->
+
+<div class="farm-card">
+
+<img src="images/farm3.jpg">
+
+<h3>Golden Wheat Flour</h3>
+
+<p>Organic Grains</p>
+
+<a href="farm3.html">
+<button>View Products</button>
+</a>
+
+
+</div>
+
+</div>
+<div class="view-all-container">
+    <a href="farms.html" class="view-all-btn">View All</a>
+</div>
+</section>
+
+
+
+<script src="js/script.js"></script>
+<footer class="footer">
+
+<div class="footer-container">
+
+<div class="footer-section">
+<h3>Smart Farm Marketplace</h3>
+<p>Connecting farmers and buyers for fresh and organic farm products.</p>
+</div>
+
+<div class="footer-section">
+<h3>Quick Links</h3>
+<a href="index.html">Home</a><br>
+<a href="farms.html">Farms</a><br>
+<a href="login.html">Login</a><br>
+<a href="register.html">Register</a>
+<a href="cart.html">Cart</a>
+</div>
+
+<div class="footer-section">
+<h3>Contact</h3>
+<p>Email: smartfarm@gmail.com</p>
+<p>Phone: +92 300 1234567</p>
+<p>Location: Lahore, Pakistan</p>
+</div>
+
+</div>
+
+<p class="copyright">
+© 2026 Smart Farm Marketplace | All Rights Reserved
+</p>
+
+</footer>
+</body>
+
+</html>

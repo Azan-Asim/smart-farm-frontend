@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>Pesticides & Fertilizers - Smart Farm Marketplace</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+
+<body>
+
+  <header>
+    <div class="logo">Smart Farm Marketplace</div>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="create-farm.html">Create Farm</a>
+      <a href="pesticides.html">Pesticides</a>
+    </nav>
+  </header>
+
+  <section class="products-page">
+    <h1>Pesticides & Fertilizers</h1>
+
+    <!-- Dealer Profile Section -->
+    <div id="dealer-profile-section" class="dealer-profile-section" style="display: none;">
+      <h2>Dealer Profile</h2>
+      <form id="dealer-profile-form">
+        <input type="text" id="dealerName" placeholder="Dealer Name" required>
+        <input type="text" id="shopName" placeholder="Shop Name" required>
+        <input type="text" id="dealerLocation" placeholder="Location" required>
+        <input type="text" id="dealerPhone" placeholder="Phone" required>
+        <button type="submit">Save Profile</button>
+      </form>
+      <div id="profile-message"></div>
+    </div>
+
+    <!-- Add Pesticide Section -->
+    <div id="add-pesticide-section" class="add-pesticide-section" style="display: none;">
+      <h2>Add New Pesticide / Fertilizer Listing</h2>
+      <form id="pesticide-form">
+        <input type="text" id="pesticideName" placeholder="Product Name" required>
+        <input type="number" id="pesticidePrice" placeholder="Price" required>
+        <input type="text" id="pesticideDescription" placeholder="Description">
+        <input type="text" id="pesticideImage" placeholder="Image URL">
+        <input type="number" id="pesticideStock" placeholder="Stock" value="0">
+        <button type="submit">Add Pesticide</button>
+      </form>
+      <div id="pesticide-message"></div>
+    </div>
+
+    <!-- Pesticides List -->
+    <h2>Available Listings</h2>
+    <div class="products-grid" id="pesticide-list">
+      <!-- Pesticides will be populated here by JavaScript -->
+    </div>
+  </section>
+
+  <script src="js/script.js"></script>
+</body>
+</html>

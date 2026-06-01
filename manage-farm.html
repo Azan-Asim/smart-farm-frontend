@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>Manage Farm Products - Smart Farm Marketplace</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+
+<body>
+
+  <header>
+    <div class="logo">Smart Farm Marketplace</div>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="create-farm.html">My Farms</a>
+    </nav>
+  </header>
+
+  <section class="dashboard">
+    <h1>Manage Farm Products</h1>
+
+    <div class="dashboard-form-container">
+      <h2>Add New Product</h2>
+      <div class="dashboard-form">
+        <input type="text" id="productName" placeholder="Product Name" required>
+        <input type="number" id="productPrice" placeholder="Price (Rs)" required>
+        <input type="text" id="productCategory" placeholder="Category (e.g. Vegetables, Fruits, Grains)" required>
+        <input type="number" id="productStock" placeholder="Stock Quantity" value="0" required>
+        <input type="text" id="productImage" placeholder="Product Image URL">
+        <button onclick="addProduct()">Add Product</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="products-section">
+    <h2>Current Products List</h2>
+    <div id="product-list" class="products">
+      <!-- Products will be populated here by JavaScript -->
+    </div>
+  </section>
+
+  <script src="js/script.js"></script>
+</body>
+
+</html>

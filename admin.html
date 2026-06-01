@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>Admin Dashboard - Smart Farm Marketplace</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+
+<body>
+
+  <header>
+    <div class="logo"><i class="fas fa-seedling"></i> Smart Farm Admin</div>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="#" onclick="logout()">Logout</a>
+    </nav>
+  </header>
+
+  <section class="admin-panel">
+    <h1>Admin Console</h1>
+    <p class="admin-subtitle">Manage system users, listings, farm products, orders, and dealers.</p>
+
+    <!-- Stat Grid -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon" style="color: #3b82f6;"><i class="fas fa-users"></i></div>
+        <div class="stat-info">
+          <h3>Total Users</h3>
+          <p id="totalUsers">0</p>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon" style="color: #10b981;"><i class="fas fa-tractor"></i></div>
+        <div class="stat-info">
+          <h3>Total Farms</h3>
+          <p id="totalFarms">0</p>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon" style="color: #f59e0b;"><i class="fas fa-box-open"></i></div>
+        <div class="stat-info">
+          <h3>Products</h3>
+          <p id="totalProducts">0</p>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon" style="color: #8b5cf6;"><i class="fas fa-shopping-bag"></i></div>
+        <div class="stat-info">
+          <h3>Total Orders</h3>
+          <p id="totalOrders">0</p>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon" style="color: #10b981;"><i class="fas fa-coins"></i></div>
+        <div class="stat-info">
+          <h3>Revenue</h3>
+          <p id="totalRevenue">Rs 0</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Management Sections -->
+    <div class="admin-sections-container">
+      
+      <!-- Users Table -->
+      <div class="admin-table-card">
+        <h2><i class="fas fa-users"></i> User Accounts</h2>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="usersList">
+              <!-- Appended via JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Farms Table -->
+      <div class="admin-table-card">
+        <h2><i class="fas fa-tractor"></i> Registered Farms</h2>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Farm Name</th>
+                <th>Farmer</th>
+                <th>Location</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="farmsList">
+              <!-- Appended via JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Products Table -->
+      <div class="admin-table-card">
+        <h2><i class="fas fa-leaf"></i> Farm Products</h2>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Product Name</th>
+                <th>Farm Name</th>
+                <th>Price</th>
+                <th>Stock</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="productsList">
+              <!-- Appended via JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Orders Table -->
+      <div class="admin-table-card">
+        <h2><i class="fas fa-receipt"></i> Orders Management</h2>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Order ID</th>
+                <th>Buyer</th>
+                <th>Total</th>
+                <th>Status</th>
+                <th>Date</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="ordersList">
+              <!-- Appended via JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Pesticide Dealers Table -->
+      <div class="admin-table-card">
+        <h2><i class="fas fa-store"></i> Pesticide Dealers</h2>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Dealer Name</th>
+                <th>Shop Name</th>
+                <th>Location</th>
+                <th>Phone</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="dealersList">
+              <!-- Appended via JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <script src="js/script.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>Farmer Dashboard - Smart Farm Marketplace</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+
+<body>
+
+  <header>
+    <div class="logo">Smart Farm Marketplace</div>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="farms.html">Farms</a>
+      <a href="create-farm.html">Create Farm</a>
+    </nav>
+  </header>
+
+  <section class="dashboard">
+    <h1>Farmer Dashboard</h1>
+
+    <div class="dashboard-form-container">
+      <h2>Create Your Farm Profile</h2>
+      <div class="dashboard-form">
+        <input type="text" id="farmName" placeholder="Farm Name" required>
+        <input type="text" id="farmDescription" placeholder="Farm Description (optional)">
+        <input type="text" id="farmLocation" placeholder="Location" required>
+        <input type="text" id="farmImage" placeholder="Farm Image URL">
+        <button onclick="createFarm()">Create Farm</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="farms-section">
+    <h2>Your Registered Farms</h2>
+    <div id="farm-list" class="products">
+      <!-- Farms will be populated here by JavaScript -->
+    </div>
+  </section>
+
+  <script src="js/script.js"></script>
+
+</body>
+</html>

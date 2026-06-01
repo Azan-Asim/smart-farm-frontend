@@ -1,0 +1,4219 @@
+const API_BASE = (localStorage.getItem("smartFarmApiBase") || "http://localhost:5000").replace(/\/$/, "");
+const TOKEN_KEY = "token";
+const USER_KEY = "user";
+const GUEST_CART_KEY = "cart";
+
+let slideTimer = null;
+let slideIndex = 0;
+
+function explore() {
+  alert("Welcome to Smart Farm Marketplace");
+}
+
+function apiUrl(path) {
+  return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+function readJson(value, fallback = null) {
+  try {
+    return JSON.parse(value) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function money(value) {
+  const amount = Number(value || 0);
+  return `Rs ${Number.isFinite(amount) ? amount.toFixed(0) : "0"}`;
+}
+
+function toNumber(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function getToken() {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+function getUser() {
+  return readJson(localStorage.getItem(USER_KEY), null);
+}
+
+function getRole() {
+  return getUser()?.role || "";
+}
+
+function saveSession(token, user) {
+  localStorage.setItem(TOKEN_KEY, token);
+  localStorage.setItem(USER_KEY, JSON.stringify(user));
+}
+
+function clearSession() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
+}
+
+async function apiFetch(path, { method = "GET", auth = false, body, headers = {} } = {}) {
+  const requestHeaders = { Accept: "application/json", ...headers };
+  let requestBody = body;
+
+  if (body !== undefined && body !== null && typeof body === "object" && !(body instanceof FormData)) {
+    requestHeaders["Content-Type"] = "application/json";
+    requestBody = JSON.stringify(body);
+  }
+
+  if (auth && getToken()) {
+    requestHeaders.Authorization = `Bearer ${getToken()}`;
+  }
+
+  const response = await fetch(apiUrl(path), {
+    method,
+    headers: requestHeaders,
+    body: requestBody,
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  let data = null;
+  if (contentType.includes("application/json")) {
+    data = await response.json();
+  } else {
+    data = await response.text();
+  }
+
+  if (!response.ok) {
+    const message = data && typeof data === "object" && data.message ? data.message : typeof data === "string" ? data : `Request failed (${response.status})`;
+    throw new Error(message);
+  }
+
+  return data;
+}
+
+function notify(message) {
+  alert(message);
+}
+
+function ensureMessage(container, message, tone = "info") {
+  if (!container) return;
+  let box = container.querySelector("[data-message-box]");
+  if (!box) {
+    box = document.createElement("div");
+    box.dataset.messageBox = "true";
+    box.style.margin = "12px 0";
+    box.style.padding = "10px 14px";
+    box.style.borderRadius = "10px";
+    container.prepend(box);
+  }
+  box.textContent = message;
+  box.style.background = tone === "error" ? "#ffe6e6" : tone === "success" ? "#e6ffea" : "#eef4ff";
+  box.style.color = tone === "error" ? "#9b1c1c" : tone === "success" ? "#156b2d" : "#123a73";
+}
+
+function guessCategory(text = "") {
+  const lower = String(text).toLowerCase();
+  if (lower.includes("dairy") || lower.includes("milk") || lower.includes("egg") || lower.includes("chicken")) return "dairy";
+  if (lower.includes("grain") || lower.includes("wheat") || lower.includes("rice") || lower.includes("flour")) return "Grains";
+  if (lower.includes("fruit")) return "fruits";
+  if (lower.includes("sea") || lower.includes("fish")) return "Sea food";
+  if (lower.includes("spice")) return "spices";
+  if (lower.includes("veg") || lower.includes("tomato") || lower.includes("carrot") || lower.includes("spinach")) return "vegetables";
+  return "vegetables";
+}
+
+function getFarmIdFromUrl() {
+  const queryId = new URLSearchParams(window.location.search).get("id");
+  if (queryId) return Number(queryId);
+  const match = window.location.pathname.match(/farm(\d+)\.html$/i);
+  return match ? Number(match[1]) : null;
+}
+
+function updateCartCount(remoteItems = null) {
+  const cartCount = document.getElementById("cart-count");
+  if (!cartCount) return;
+
+  if (Array.isArray(remoteItems)) {
+    cartCount.textContent = String(remoteItems.reduce((sum, item) => sum + toNumber(item.quantity, 0), 0));
+    return;
+  }
+
+  if (getToken()) {
+    apiFetch("/api/cart", { auth: true })
+      .then((data) => {
+        const items = Array.isArray(data.items) ? data.items : [];
+        cartCount.textContent = String(items.reduce((sum, item) => sum + toNumber(item.quantity, 0), 0));
+      })
+      .catch(() => {
+        cartCount.textContent = "0";
+      });
+    return;
+  }
+
+  const cart = readJson(localStorage.getItem(GUEST_CART_KEY), []);
+  cartCount.textContent = String(cart.reduce((sum, item) => sum + toNumber(item.quantity, 0), 0));
+}
+
+function showSlides(index) {
+  const slides = document.querySelectorAll(".slide");
+  const dots = document.querySelectorAll(".dot");
+  if (!slides.length || !dots.length) return;
+
+  slides.forEach((slide) => slide.classList.remove("active"));
+  dots.forEach((dot) => dot.classList.remove("active"));
+
+  let nextIndex = index;
+  if (nextIndex >= slides.length) nextIndex = 0;
+  if (nextIndex < 0) nextIndex = slides.length - 1;
+
+  slides[nextIndex].classList.add("active");
+  if (dots[nextIndex]) dots[nextIndex].classList.add("active");
+  slideIndex = nextIndex;
+}
+
+function currentSlide(index) {
+  showSlides(index);
+}
+
+function startCarousel() {
+  const slides = document.querySelectorAll(".slide");
+  if (!slides.length) return;
+
+  showSlides(0);
+  window.clearInterval(slideTimer);
+  slideTimer = window.setInterval(() => {
+    showSlides(slideIndex + 1);
+  }, 5000);
+}
+
+function farmCardTemplate(farm) {
+  const card = document.createElement("div");
+  card.className = "farm-card";
+  card.dataset.category = guessCategory(`${farm.farm_name || ""} ${farm.description || ""}`);
+  card.dataset.search = `${farm.farm_name || ""} ${farm.location || ""} ${farm.description || ""}`.toLowerCase();
+  card.innerHTML = `
+    <img src="${escapeHtml(farm.image || "images/farm.jpg")}" alt="${escapeHtml(farm.farm_name || "Farm")}">
+    <h3>${escapeHtml(farm.farm_name || "Farm")}</h3>
+    <p>${escapeHtml(farm.location || "")}</p>
+    <a href="farm1.html?id=${farm.id}"><button type="button">View Products</button></a>
+  `;
+  return card;
+}
+
+function productCardTemplate(product) {
+  const card = document.createElement("div");
+  card.className = "product-card";
+  card.innerHTML = `
+    <img src="${escapeHtml(product.image || "images/farm.jpg")}" alt="${escapeHtml(product.product_name || "Product")}">
+    <h3>${escapeHtml(product.product_name || "Product")}</h3>
+    <p>${escapeHtml(product.description || product.category || "")}</p>
+    <p>${money(product.price)}</p>
+  `;
+  return card;
+}
+
+function renderCartItem(item, itemRef, remote = false) {
+  const li = document.createElement("li");
+  li.innerHTML = `
+    <div>
+      <strong>${escapeHtml(item.product_name || item.product || "Item")}</strong>
+      <div>${money(item.price)} x ${toNumber(item.quantity, 1)}</div>
+    </div>
+    <div class="cart-actions"></div>
+  `;
+
+  const actions = li.querySelector(".cart-actions");
+  const plus = document.createElement("button");
+  plus.type = "button";
+  plus.textContent = "+";
+  plus.addEventListener("click", () => increaseQty(itemRef, item.quantity, item.stock, remote));
+
+  const minus = document.createElement("button");
+  minus.type = "button";
+  minus.textContent = "-";
+  minus.addEventListener("click", () => decreaseQty(itemRef, item.quantity, remote));
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.textContent = "Remove";
+  remove.addEventListener("click", () => removeItem(itemRef, remote));
+
+  actions.append(plus, minus, remove);
+  return li;
+}
+
+function bindAuthForms() {
+  const loginForm = document.querySelector(".login-page form");
+  if (loginForm && !loginForm.dataset.bound) {
+    loginForm.dataset.bound = "true";
+    loginForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const data = await apiFetch("/api/auth/login", {
+          method: "POST",
+          body: {
+            email: loginForm.querySelector('input[type="email"]')?.value.trim() || "",
+            password: loginForm.querySelector('input[type="password"]')?.value || "",
+          },
+        });
+        saveSession(data.token, data.user);
+        if (data.user?.role === "Admin") window.location.href = "admin.html";
+        else if (data.user?.role === "Farmer") window.location.href = "create-farm.html";
+        else if (data.user?.role === "Dealer") window.location.href = "pesticides.html";
+        else window.location.href = "index.html";
+      } catch (error) {
+        ensureMessage(loginForm, error.message, "error");
+      }
+    });
+  }
+
+  const registerForm = document.querySelector(".register-page form");
+  if (registerForm && !registerForm.dataset.bound) {
+    registerForm.dataset.bound = "true";
+    registerForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const fields = registerForm.querySelectorAll("input");
+      try {
+        await apiFetch("/api/auth/register", {
+          method: "POST",
+          body: {
+            name: fields[0]?.value.trim() || "",
+            email: fields[1]?.value.trim() || "",
+            password: fields[2]?.value || "",
+            role: registerForm.querySelector("#role")?.value || "buyer",
+          },
+        });
+        ensureMessage(registerForm, "Account created. Please log in.", "success");
+        window.location.href = "login.html";
+      } catch (error) {
+        ensureMessage(registerForm, error.message, "error");
+      }
+    });
+  }
+}
+
+async function logout() {
+  try {
+    if (getToken()) {
+      await apiFetch("/api/auth/logout", { method: "POST", auth: true });
+    }
+  } catch {
+    // ignore logout failures and still clear local state
+  }
+  clearSession();
+  window.location.href = "index.html";
+}
+
+function bindLogoutLinks() {
+  document.querySelectorAll('[onclick="logout()"]').forEach((node) => {
+    if (node.dataset.boundLogout) return;
+    node.dataset.boundLogout = "true";
+    node.addEventListener("click", (event) => {
+      event.preventDefault();
+      logout();
+    });
+  });
+}
+
+function redirectAfterLoginIfNeeded() {
+  if (typeof window.foundUser !== "undefined") return;
+  const user = getUser();
+  if (!user) return;
+
+  const path = window.location.pathname.split("/").pop();
+  if (path === "login.html" || path === "register.html") {
+    if (user.role === "Admin") window.location.href = "admin.html";
+    else if (user.role === "Farmer") window.location.href = "create-farm.html";
+    else if (user.role === "Dealer") window.location.href = "pesticides.html";
+    else window.location.href = "index.html";
+  }
+}
+
+async function loadHomePage() {
+  const container = document.querySelector(".top-farms .farms-container");
+  if (!container) return;
+  try {
+    const data = await apiFetch("/api/farms");
+    const farms = Array.isArray(data.farms) ? data.farms.slice(0, 3) : [];
+    if (!farms.length) return;
+    container.innerHTML = "";
+    farms.forEach((farm) => container.appendChild(farmCardTemplate(farm)));
+  } catch {
+    // keep static fallback
+  }
+}
+
+async function loadFarmsPage() {
+  const page = document.querySelector(".farms-page");
+  const grid = document.querySelector(".farms-page .farms-grid");
+  if (!page || !grid) return;
+  try {
+    const data = await apiFetch("/api/farms");
+    grid.innerHTML = "";
+    (data.farms || []).forEach((farm) => grid.appendChild(farmCardTemplate(farm)));
+    searchItems();
+  } catch (error) {
+    ensureMessage(page, error.message, "error");
+  }
+}
+
+async function loadFarmDetailPage() {
+  const farmId = getFarmIdFromUrl();
+  const profile = document.querySelector(".farm-profile");
+  const productsSection = document.querySelector(".products");
+  if (!farmId || !profile || !productsSection) return;
+
+  try {
+    const data = await apiFetch(`/api/farms/${farmId}`);
+    const farm = data.farm;
+    if (!farm) return;
+
+    document.title = farm.farm_name || document.title;
+    profile.innerHTML = `
+      <img src="${escapeHtml(farm.image || "images/farm.jpg")}" alt="${escapeHtml(farm.farm_name || "Farm")}">
+      <div class="farm-info">
+        <h1>${escapeHtml(farm.farm_name || "Farm")}</h1>
+        <p><strong>Farmer:</strong> ${escapeHtml(farm.farmer_name || "")}</p>
+        <p><strong>Location:</strong> ${escapeHtml(farm.location || "")}</p>
+        <p>${escapeHtml(farm.description || "")}</p>
+      </div>
+    `;
+
+    productsSection.innerHTML = "<h2>Products from this Farm</h2>";
+    const wrapper = document.createElement("div");
+    wrapper.className = "product-container";
+    (data.products || []).forEach((product) => {
+      const card = document.createElement("div");
+      card.className = "product";
+      card.innerHTML = `
+        <img src="${escapeHtml(product.image || "images/farm.jpg")}" alt="${escapeHtml(product.product_name || "Product")}">
+        <h3>${escapeHtml(product.product_name || "Product")}</h3>
+        <p>${money(product.price)}</p>
+        <p>Stock: ${escapeHtml(product.stock ?? 0)}</p>
+      `;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "Add to Cart";
+      button.addEventListener("click", () => addToCart(product.id, "Farm", 1, product));
+      card.appendChild(button);
+      wrapper.appendChild(card);
+    });
+    productsSection.appendChild(wrapper);
+  } catch (error) {
+    ensureMessage(profile, error.message, "error");
+  }
+}
+
+async function createFarm() {
+  const farmName = document.getElementById("farmName")?.value.trim() || "";
+  const farmDescription = document.getElementById("farmDescription")?.value.trim() || "";
+  const farmLocation = document.getElementById("farmLocation")?.value.trim() || "";
+  const farmImage = document.getElementById("farmImage")?.value.trim() || "";
+  try {
+    const data = await apiFetch("/api/farms", {
+      method: "POST",
+      auth: true,
+      body: {
+        farm_name: farmName,
+        location: farmLocation,
+        description: farmDescription,
+        image: farmImage,
+      },
+    });
+    notify(data.message || "Farm created successfully");
+    await displayFarms();
+  } catch (error) {
+    ensureMessage(document.querySelector(".dashboard"), error.message, "error");
+  }
+}
+
+async function displayFarms() {
+  const container = document.getElementById("farm-list");
+  if (!container) return;
+  try {
+    const data = await apiFetch("/api/farms", { auth: true });
+    const user = getUser();
+    const farms = Array.isArray(data.farms) ? data.farms : [];
+    const visible = user ? farms.filter((farm) => Number(farm.farmer_id) === Number(user.id) || user.role === "Admin") : farms;
+    container.innerHTML = "";
+    if (!visible.length) {
+      container.innerHTML = "<p>No farms found yet.</p>";
+      return;
+    }
+    visible.forEach((farm) => {
+      const card = document.createElement("div");
+      card.className = "product";
+      card.innerHTML = `
+        <img src="${escapeHtml(farm.image || "images/farm.jpg")}" alt="${escapeHtml(farm.farm_name || "Farm")}">
+        <h3>${escapeHtml(farm.farm_name || "Farm")}</h3>
+        <p>${escapeHtml(farm.location || "")}</p>
+        <p>${escapeHtml(farm.description || "")}</p>
+      `;
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.textContent = "Edit Farm";
+      edit.addEventListener("click", () => editFarm(farm));
+      const del = document.createElement("button");
+      del.type = "button";
+      del.textContent = "Delete Farm";
+      del.addEventListener("click", () => deleteFarm(farm.id, farm.farm_name));
+      card.append(edit, del);
+      container.appendChild(card);
+    });
+  } catch (error) {
+    container.innerHTML = `<p>${escapeHtml(error.message)}</p>`;
+  }
+}
+
+async function editFarm(farm) {
+  const farm_name = window.prompt("Farm name", farm.farm_name || "");
+  if (farm_name === null) return;
+  const location = window.prompt("Location", farm.location || "");
+  if (location === null) return;
+  const description = window.prompt("Description", farm.description || "");
+  if (description === null) return;
+  const image = window.prompt("Image URL", farm.image || "");
+  if (image === null) return;
+  try {
+    await apiFetch(`/api/farms/${farm.id}`, {
+      method: "PUT",
+      auth: true,
+      body: { farm_name, location, description, image },
+    });
+    await displayFarms();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+async function deleteFarm(farmId, farmName) {
+  if (!window.confirm(`Delete ${farmName || "this farm"}?`)) return;
+  try {
+    await apiFetch(`/api/farms/${farmId}`, { method: "DELETE", auth: true });
+    await displayFarms();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+function ensureManageFarmInputs() {
+  const form = document.querySelector(".dashboard");
+  if (!form || document.getElementById("productCategory")) return;
+
+  const productName = document.getElementById("productName");
+  const category = document.createElement("input");
+  category.type = "text";
+  category.id = "productCategory";
+  category.placeholder = "Category";
+  const stock = document.createElement("input");
+  stock.type = "number";
+  stock.id = "productStock";
+  stock.placeholder = "Stock";
+
+  if (productName && productName.parentNode) {
+    productName.insertAdjacentElement("afterend", category);
+    category.insertAdjacentElement("afterend", stock);
+  } else {
+    form.append(category, stock);
+  }
+}
+
+async function addProduct() {
+  const productName = document.getElementById("productName")?.value.trim() || "";
+  const productPrice = document.getElementById("productPrice")?.value || "";
+  const productCategory = document.getElementById("productCategory")?.value.trim() || "General";
+  const productStock = document.getElementById("productStock")?.value || "0";
+  const productImage = document.getElementById("productImage")?.value.trim() || "";
+  try {
+    const data = await apiFetch("/api/products", {
+      method: "POST",
+      auth: true,
+      body: {
+        product_name: productName,
+        price: toNumber(productPrice),
+        category: productCategory,
+        image: productImage,
+        stock: toNumber(productStock),
+      },
+    });
+    notify(data.message || "Product created successfully");
+    await displayFarmProducts();
+  } catch (error) {
+    ensureMessage(document.querySelector(".dashboard"), error.message, "error");
+  }
+}
+
+async function displayFarmProducts() {
+  const container = document.getElementById("product-list");
+  if (!container) return;
+  try {
+    const data = await apiFetch("/api/farmer/products", { auth: true });
+    const products = Array.isArray(data.products) ? data.products : [];
+    container.innerHTML = "";
+    if (!products.length) {
+      container.innerHTML = "<p>No products found yet.</p>";
+      return;
+    }
+    products.forEach((product) => {
+      const card = document.createElement("div");
+      card.className = "product";
+      card.innerHTML = `
+        <img src="${escapeHtml(product.image || "images/farm.jpg")}" alt="${escapeHtml(product.product_name || "Product")}">
+        <h3>${escapeHtml(product.product_name || "Product")}</h3>
+        <p>${money(product.price)}</p>
+        <p>Category: ${escapeHtml(product.category || "General")}</p>
+        <p>Stock: ${escapeHtml(product.stock ?? 0)}</p>
+      `;
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.textContent = "Edit Product";
+      edit.addEventListener("click", () => editProduct(product));
+      const del = document.createElement("button");
+      del.type = "button";
+      del.textContent = "Delete Product";
+      del.addEventListener("click", () => deleteProduct(product.id, product.product_name));
+      card.append(edit, del);
+      container.appendChild(card);
+    });
+  } catch (error) {
+    container.innerHTML = `<p>${escapeHtml(error.message)}</p>`;
+  }
+}
+
+async function editProduct(product) {
+  const product_name = window.prompt("Product name", product.product_name || "");
+  if (product_name === null) return;
+  const price = window.prompt("Price", String(product.price ?? 0));
+  if (price === null) return;
+  const category = window.prompt("Category", product.category || "General");
+  if (category === null) return;
+  const image = window.prompt("Image URL", product.image || "");
+  if (image === null) return;
+  const stock = window.prompt("Stock", String(product.stock ?? 0));
+  if (stock === null) return;
+  try {
+    await apiFetch(`/api/products/${product.id}`, {
+      method: "PUT",
+      auth: true,
+      body: {
+        product_name,
+        price: toNumber(price),
+        category,
+        image,
+        stock: toNumber(stock),
+      },
+    });
+    await displayFarmProducts();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+async function deleteProduct(productId, productName) {
+  if (!window.confirm(`Delete ${productName || "this product"}?`)) return;
+  try {
+    await apiFetch(`/api/products/${productId}`, { method: "DELETE", auth: true });
+    await displayFarmProducts();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+function getLocalCart() {
+  return readJson(localStorage.getItem(GUEST_CART_KEY), []);
+}
+
+function setLocalCart(items) {
+  localStorage.setItem(GUEST_CART_KEY, JSON.stringify(items));
+}
+
+async function addToCart(productOrId, secondArg, quantity = 1, productMeta = null) {
+  const productType = secondArg === "Farm" || secondArg === "Pesticide" ? secondArg : null;
+
+  if (getToken() && productType) {
+    try {
+      const data = await apiFetch("/api/cart", {
+        method: "POST",
+        auth: true,
+        body: {
+          product_id: productOrId,
+          product_type: productType,
+          quantity,
+        },
+      });
+      updateCartCount();
+      notify(data.message || `${productMeta?.product_name || "Item"} added to cart`);
+      return;
+    } catch (error) {
+      notify(error.message);
+      return;
+    }
+  }
+
+  const cart = getLocalCart();
+  const productName = productMeta?.product_name || String(productOrId || "Item");
+  const price = productType ? toNumber(productMeta?.price) : toNumber(secondArg);
+  const existing = cart.find((item) => item.product === productName);
+  if (existing) existing.quantity += quantity;
+  else cart.push({ product: productName, price, quantity });
+  setLocalCart(cart);
+  updateCartCount();
+  notify(`${productName} added to cart`);
+}
+
+async function increaseQty(itemRef, currentQuantity, stock, remote = false) {
+  if (remote || (typeof itemRef === "number" && getToken())) {
+    const nextQuantity = toNumber(currentQuantity, 1) + 1;
+    if (stock != null && nextQuantity > toNumber(stock)) {
+      notify("Requested quantity exceeds stock");
+      return;
+    }
+    try {
+      await apiFetch(`/api/cart/${itemRef}`, { method: "PUT", auth: true, body: { quantity: nextQuantity } });
+      await loadCart();
+    } catch (error) {
+      notify(error.message);
+    }
+    return;
+  }
+
+  const cart = getLocalCart();
+  if (!cart[itemRef]) return;
+  cart[itemRef].quantity += 1;
+  setLocalCart(cart);
+  loadCartFromLocalStorage();
+}
+
+async function decreaseQty(itemRef, currentQuantity, remote = false) {
+  if (remote || (typeof itemRef === "number" && getToken())) {
+    const nextQuantity = toNumber(currentQuantity, 1) - 1;
+    if (nextQuantity < 1) {
+      await removeItem(itemRef, true);
+      return;
+    }
+    try {
+      await apiFetch(`/api/cart/${itemRef}`, { method: "PUT", auth: true, body: { quantity: nextQuantity } });
+      await loadCart();
+    } catch (error) {
+      notify(error.message);
+    }
+    return;
+  }
+
+  const cart = getLocalCart();
+  if (!cart[itemRef]) return;
+  if (cart[itemRef].quantity > 1) cart[itemRef].quantity -= 1;
+  else cart.splice(itemRef, 1);
+  setLocalCart(cart);
+  loadCartFromLocalStorage();
+}
+
+async function removeItem(itemRef, remote = false) {
+  if (remote || (typeof itemRef === "number" && getToken())) {
+    try {
+      await apiFetch(`/api/cart/${itemRef}`, { method: "DELETE", auth: true });
+      await loadCart();
+    } catch (error) {
+      notify(error.message);
+    }
+    return;
+  }
+
+  const cart = getLocalCart();
+  cart.splice(itemRef, 1);
+  setLocalCart(cart);
+  loadCartFromLocalStorage();
+}
+
+async function clearCart() {
+  if (getToken()) {
+    try {
+      const data = await apiFetch("/api/cart", { auth: true });
+      const items = Array.isArray(data.items) ? data.items : [];
+      await Promise.all(items.map((item) => apiFetch(`/api/cart/${item.id}`, { method: "DELETE", auth: true })));
+    } catch {
+      // ignore and fall back to local clear
+    }
+  }
+  localStorage.removeItem(GUEST_CART_KEY);
+  await loadCart();
+}
+
+async function handleCheckout(event) {
+  event.preventDefault();
+  if (!getToken()) {
+    notify("Please log in before placing an order.");
+    window.location.href = "login.html";
+    return;
+  }
+  try {
+    const data = await apiFetch("/api/orders", { method: "POST", auth: true });
+    ensureMessage(event.currentTarget, data.message || "Order placed successfully", "success");
+    await clearCart();
+    await loadOrdersSection();
+  } catch (error) {
+    ensureMessage(event.currentTarget, error.message, "error");
+  }
+}
+
+function renderOrders(parent, orders) {
+  if (!parent) return;
+  parent.innerHTML = "";
+  if (!orders.length) {
+    parent.innerHTML = "<li>No orders found.</li>";
+    return;
+  }
+
+  orders.forEach((order) => {
+    const card = document.createElement("div");
+    card.className = "product";
+    const items = Array.isArray(order.items) && order.items.length
+      ? `<ul>${order.items.map((item) => `<li>${escapeHtml(item.product_name)} x ${escapeHtml(item.quantity)} (${money(item.price)})</li>`).join("")}</ul>`
+      : "";
+    card.innerHTML = `
+      <h3>Order #${escapeHtml(order.id)}</h3>
+      <p><strong>Status:</strong> ${escapeHtml(order.status)}</p>
+      <p><strong>Total:</strong> ${money(order.total_amount)}</p>
+      <p><strong>Created:</strong> ${escapeHtml(order.created_at || "")}</p>
+      ${order.buyer_name ? `<p><strong>Buyer:</strong> ${escapeHtml(order.buyer_name)}</p>` : ""}
+      ${items}
+    `;
+    if (getRole() === "Farmer" || getRole() === "Admin") {
+      const select = document.createElement("select");
+      select.id = `order-status-${order.id}`;
+      ["Pending", "Shipped", "Delivered"].forEach((status) => {
+        const option = document.createElement("option");
+        option.value = status;
+        option.textContent = status;
+        if (status === order.status) option.selected = true;
+        select.appendChild(option);
+      });
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "Update Status";
+      button.addEventListener("click", () => updateOrderStatus(order.id));
+      card.append(select, button);
+    }
+    parent.appendChild(card);
+  });
+}
+
+async function loadOrdersSection() {
+  const parent = document.querySelector(".cart-page") || document.querySelector(".checkout") || document.querySelector(".admin-panel");
+  if (!parent || !getToken()) return;
+
+  let section = document.getElementById("order-history-section");
+  if (!section) {
+    section = document.createElement("section");
+    section.id = "order-history-section";
+    section.innerHTML = "<h2>My Orders</h2><ul id='order-history'></ul>";
+    parent.appendChild(section);
+  }
+
+  const list = section.querySelector("#order-history");
+  try {
+    const data = await apiFetch("/api/orders", { auth: true });
+    const orders = Array.isArray(data.orders) ? data.orders : [];
+    renderOrders(list, orders);
+  } catch (error) {
+    ensureMessage(section, error.message, "error");
+  }
+}
+
+async function loadOrders() {
+  await loadOrdersSection();
+}
+
+async function updateOrderStatus(orderId) {
+  const select = document.getElementById(`order-status-${orderId}`);
+  if (!select) return;
+  try {
+    await apiFetch(`/api/orders/${orderId}`, { method: "PUT", auth: true, body: { status: select.value } });
+    await loadAdminPanel();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+async function loadAdminPanel() {
+  const adminPanel = document.querySelector(".admin-panel");
+  if (!adminPanel) return;
+  if (!getToken() || getRole() !== "Admin") {
+    ensureMessage(adminPanel, "Admin access required.", "error");
+    return;
+  }
+
+  try {
+    const [stats, users, farms, products, orders, dealers] = await Promise.all([
+      apiFetch("/api/admin/stats", { auth: true }),
+      apiFetch("/api/admin/users", { auth: true }),
+      apiFetch("/api/admin/farms", { auth: true }),
+      apiFetch("/api/admin/products", { auth: true }),
+      apiFetch("/api/admin/orders", { auth: true }),
+      apiFetch("/api/admin/dealers", { auth: true }),
+    ]);
+
+    const totalUsers = document.getElementById("totalUsers");
+    const totalFarms = document.getElementById("totalFarms");
+    if (totalUsers) totalUsers.textContent = stats.total_users ?? 0;
+    if (totalFarms) totalFarms.textContent = stats.total_farms ?? 0;
+
+    const usersList = document.getElementById("usersList");
+    if (usersList) {
+      usersList.innerHTML = "";
+      (users.users || []).forEach((user) => {
+        const li = document.createElement("li");
+        li.innerHTML = `<span>${escapeHtml(user.name)} - ${escapeHtml(user.role)}</span>`;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "Delete";
+        button.addEventListener("click", async () => {
+          if (!window.confirm(`Delete ${user.name}?`)) return;
+          try {
+            await apiFetch(`/api/admin/users/${user.id}`, { method: "DELETE", auth: true });
+            await loadAdminPanel();
+          } catch (error) {
+            notify(error.message);
+          }
+        });
+        li.appendChild(button);
+        usersList.appendChild(li);
+      });
+    }
+
+    const farmsList = document.getElementById("farmsList");
+    if (farmsList) {
+      farmsList.innerHTML = "";
+      (farms.farms || []).forEach((farm) => {
+        const li = document.createElement("li");
+        li.textContent = `${farm.farm_name} - ${farm.location}`;
+        farmsList.appendChild(li);
+      });
+    }
+
+    let summary = document.getElementById("admin-summary");
+    if (!summary) {
+      summary = document.createElement("section");
+      summary.id = "admin-summary";
+      adminPanel.appendChild(summary);
+    }
+
+    summary.innerHTML = `
+      <h2>Products</h2>
+      <ul>${(products.products || []).slice(0, 8).map((product) => `<li>${escapeHtml(product.product_name)} - ${escapeHtml(product.farm_name || "")}</li>`).join("") || "<li>No products</li>"}</ul>
+      <h2>Orders</h2>
+      <ul>${(orders.orders || []).slice(0, 8).map((order) => `<li>#${escapeHtml(order.id)} - ${money(order.total_amount)} - ${escapeHtml(order.status)} <button type='button' onclick='deleteOrder(${order.id})'>Delete</button></li>`).join("") || "<li>No orders</li>"}</ul>
+      <h2>Dealers</h2>
+      <ul>${(dealers.dealers || []).slice(0, 8).map((dealer) => `<li>${escapeHtml(dealer.dealer_name)} - ${escapeHtml(dealer.shop_name)} - ${escapeHtml(dealer.location)}</li>`).join("") || "<li>No dealers</li>"}</ul>
+    `;
+  } catch (error) {
+    ensureMessage(adminPanel, error.message, "error");
+  }
+}
+
+async function deleteUser(userId, userName) {
+  if (!window.confirm(`Delete ${userName || "this user"}?`)) return;
+  try {
+    await apiFetch(`/api/admin/users/${userId}`, { method: "DELETE", auth: true });
+    await loadAdminPanel();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+async function deleteOrder(orderId, orderName) {
+  if (!window.confirm(`Delete order ${orderName || orderId}?`)) return;
+  try {
+    await apiFetch(`/api/admin/orders/${orderId}`, { method: "DELETE", auth: true });
+    await loadAdminPanel();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+function ensureManageFarmInputs() {
+  const form = document.querySelector(".dashboard");
+  if (!form || document.getElementById("productCategory")) return;
+
+  const productName = document.getElementById("productName");
+  const category = document.createElement("input");
+  category.type = "text";
+  category.id = "productCategory";
+  category.placeholder = "Category";
+  const stock = document.createElement("input");
+  stock.type = "number";
+  stock.id = "productStock";
+  stock.placeholder = "Stock";
+
+  if (productName && productName.parentNode) {
+    productName.insertAdjacentElement("afterend", category);
+    category.insertAdjacentElement("afterend", stock);
+  } else {
+    form.append(category, stock);
+  }
+}
+
+async function addToCart(productOrId, secondArg, quantity = 1, productMeta = null) {
+  const productType = secondArg === "Farm" || secondArg === "Pesticide" ? secondArg : null;
+
+  if (getToken() && productType) {
+    try {
+      const data = await apiFetch("/api/cart", {
+        method: "POST",
+        auth: true,
+        body: {
+          product_id: productOrId,
+          product_type: productType,
+          quantity,
+        },
+      });
+      updateCartCount();
+      notify(data.message || `${productMeta?.product_name || "Item"} added to cart`);
+      return;
+    } catch (error) {
+      notify(error.message);
+      return;
+    }
+  }
+
+  const cart = readJson(localStorage.getItem(GUEST_CART_KEY), []);
+  const productName = productMeta?.product_name || String(productOrId || "Item");
+  const price = productType ? toNumber(productMeta?.price) : toNumber(secondArg);
+  const existing = cart.find((item) => item.product === productName);
+  if (existing) existing.quantity += quantity;
+  else cart.push({ product: productName, price, quantity });
+  localStorage.setItem(GUEST_CART_KEY, JSON.stringify(cart));
+  updateCartCount();
+  notify(`${productName} added to cart`);
+}
+
+async function loadCartFromApi() {
+  const list = document.getElementById("cart-items");
+  if (!list) return false;
+  try {
+    const data = await apiFetch("/api/cart", { auth: true });
+    const items = Array.isArray(data.items) ? data.items : [];
+    list.innerHTML = "";
+    if (!items.length) {
+      list.innerHTML = "<li>Your cart is empty.</li>";
+    } else {
+      items.forEach((item) => list.appendChild(renderCartItem(item, item.id, true)));
+    }
+    const totalPrice = document.getElementById("total-price");
+    if (totalPrice) totalPrice.textContent = `Total: ${money(data.total_amount || 0)}`;
+    updateCartCount(items);
+    return true;
+  } catch (error) {
+    ensureMessage(list.parentElement || list, error.message, "error");
+    return false;
+  }
+}
+
+function loadCartFromLocalStorage() {
+  const list = document.getElementById("cart-items");
+  if (!list) return;
+  const cart = readJson(localStorage.getItem(GUEST_CART_KEY), []);
+  list.innerHTML = "";
+  let total = 0;
+  if (!cart.length) {
+    list.innerHTML = "<li>Your cart is empty.</li>";
+  } else {
+    cart.forEach((item, index) => {
+      total += toNumber(item.price) * toNumber(item.quantity, 1);
+      const li = document.createElement("li");
+      li.innerHTML = `
+        <div>
+          <strong>${escapeHtml(item.product)}</strong>
+          <div>${money(item.price)} x ${toNumber(item.quantity, 1)}</div>
+        </div>
+        <div class="cart-actions"></div>
+      `;
+      const actions = li.querySelector(".cart-actions");
+      const plus = document.createElement("button");
+      plus.type = "button";
+      plus.textContent = "+";
+      plus.addEventListener("click", () => increaseQty(index));
+      const minus = document.createElement("button");
+      minus.type = "button";
+      minus.textContent = "-";
+      minus.addEventListener("click", () => decreaseQty(index));
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "Remove";
+      remove.addEventListener("click", () => removeItem(index));
+      actions.append(plus, minus, remove);
+      list.appendChild(li);
+    });
+  }
+  const totalPrice = document.getElementById("total-price");
+  if (totalPrice) totalPrice.textContent = `Total: ${money(total)}`;
+  updateCartCount();
+}
+
+async function loadCart() {
+  if (getToken()) {
+    const ok = await loadCartFromApi();
+    if (!ok) loadCartFromLocalStorage();
+  } else {
+    loadCartFromLocalStorage();
+  }
+}
+
+async function increaseQty(itemRef, currentQuantity, stock, remote = false) {
+  if (remote || (typeof itemRef === "number" && getToken())) {
+    const nextQuantity = toNumber(currentQuantity, 1) + 1;
+    if (stock != null && nextQuantity > toNumber(stock)) {
+      notify("Requested quantity exceeds stock");
+      return;
+    }
+    try {
+      await apiFetch(`/api/cart/${itemRef}`, { method: "PUT", auth: true, body: { quantity: nextQuantity } });
+      await loadCart();
+    } catch (error) {
+      notify(error.message);
+    }
+    return;
+  }
+
+  const cart = readJson(localStorage.getItem(GUEST_CART_KEY), []);
+  if (!cart[itemRef]) return;
+  cart[itemRef].quantity += 1;
+  localStorage.setItem(GUEST_CART_KEY, JSON.stringify(cart));
+  loadCartFromLocalStorage();
+}
+
+async function decreaseQty(itemRef, currentQuantity, remote = false) {
+  if (remote || (typeof itemRef === "number" && getToken())) {
+    const nextQuantity = toNumber(currentQuantity, 1) - 1;
+    if (nextQuantity < 1) {
+      await removeItem(itemRef, true);
+      return;
+    }
+    try {
+      await apiFetch(`/api/cart/${itemRef}`, { method: "PUT", auth: true, body: { quantity: nextQuantity } });
+      await loadCart();
+    } catch (error) {
+      notify(error.message);
+    }
+    return;
+  }
+
+  const cart = readJson(localStorage.getItem(GUEST_CART_KEY), []);
+  if (!cart[itemRef]) return;
+  if (cart[itemRef].quantity > 1) cart[itemRef].quantity -= 1;
+  else cart.splice(itemRef, 1);
+  localStorage.setItem(GUEST_CART_KEY, JSON.stringify(cart));
+  loadCartFromLocalStorage();
+}
+
+async function removeItem(itemRef, remote = false) {
+  if (remote || (typeof itemRef === "number" && getToken())) {
+    try {
+      await apiFetch(`/api/cart/${itemRef}`, { method: "DELETE", auth: true });
+      await loadCart();
+    } catch (error) {
+      notify(error.message);
+    }
+    return;
+  }
+
+  const cart = readJson(localStorage.getItem(GUEST_CART_KEY), []);
+  cart.splice(itemRef, 1);
+  localStorage.setItem(GUEST_CART_KEY, JSON.stringify(cart));
+  loadCartFromLocalStorage();
+}
+
+async function clearCart() {
+  if (getToken()) {
+    try {
+      const data = await apiFetch("/api/cart", { auth: true });
+      const items = Array.isArray(data.items) ? data.items : [];
+      await Promise.all(items.map((item) => apiFetch(`/api/cart/${item.id}`, { method: "DELETE", auth: true })));
+    } catch {
+      // ignore and fall back to local clear
+    }
+  }
+  localStorage.removeItem(GUEST_CART_KEY);
+  await loadCart();
+}
+
+async function handleCheckout(event) {
+  event.preventDefault();
+  if (!getToken()) {
+    notify("Please log in before placing an order.");
+    window.location.href = "login.html";
+    return;
+  }
+  try {
+    const data = await apiFetch("/api/orders", { method: "POST", auth: true });
+    ensureMessage(event.currentTarget, data.message || "Order placed successfully", "success");
+    await clearCart();
+    await loadOrdersSection();
+  } catch (error) {
+    ensureMessage(event.currentTarget, error.message, "error");
+  }
+}
+
+function renderOrders(parent, orders) {
+  if (!parent) return;
+  parent.innerHTML = "";
+  if (!orders.length) {
+    parent.innerHTML = "<li>No orders found.</li>";
+    return;
+  }
+
+  orders.forEach((order) => {
+    const card = document.createElement("div");
+    card.className = "product";
+    const items = Array.isArray(order.items) && order.items.length
+      ? `<ul>${order.items.map((item) => `<li>${escapeHtml(item.product_name)} x ${escapeHtml(item.quantity)} (${money(item.price)})</li>`).join("")}</ul>`
+      : "";
+    card.innerHTML = `
+      <h3>Order #${escapeHtml(order.id)}</h3>
+      <p><strong>Status:</strong> ${escapeHtml(order.status)}</p>
+      <p><strong>Total:</strong> ${money(order.total_amount)}</p>
+      <p><strong>Created:</strong> ${escapeHtml(order.created_at || "")}</p>
+      ${order.buyer_name ? `<p><strong>Buyer:</strong> ${escapeHtml(order.buyer_name)}</p>` : ""}
+      ${items}
+    `;
+    if (getRole() === "Farmer" || getRole() === "Admin") {
+      const select = document.createElement("select");
+      select.id = `order-status-${order.id}`;
+      ["Pending", "Shipped", "Delivered"].forEach((status) => {
+        const option = document.createElement("option");
+        option.value = status;
+        option.textContent = status;
+        if (status === order.status) option.selected = true;
+        select.appendChild(option);
+      });
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "Update Status";
+      button.addEventListener("click", () => updateOrderStatus(order.id));
+      card.append(select, button);
+    }
+    parent.appendChild(card);
+  });
+}
+
+async function loadOrdersSection() {
+  const parent = document.querySelector(".cart-page") || document.querySelector(".checkout") || document.querySelector(".admin-panel");
+  if (!parent || !getToken()) return;
+
+  let section = document.getElementById("order-history-section");
+  if (!section) {
+    section = document.createElement("section");
+    section.id = "order-history-section";
+    section.innerHTML = "<h2>My Orders</h2><ul id='order-history'></ul>";
+    parent.appendChild(section);
+  }
+
+  const list = section.querySelector("#order-history");
+  try {
+    const data = await apiFetch("/api/orders", { auth: true });
+    renderOrders(list, Array.isArray(data.orders) ? data.orders : []);
+  } catch (error) {
+    ensureMessage(section, error.message, "error");
+  }
+}
+
+async function loadOrders() {
+  await loadOrdersSection();
+}
+
+async function updateOrderStatus(orderId) {
+  const select = document.getElementById(`order-status-${orderId}`);
+  if (!select) return;
+  try {
+    await apiFetch(`/api/orders/${orderId}`, { method: "PUT", auth: true, body: { status: select.value } });
+    await loadAdminPanel();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+async function loadAdminPanel() {
+  const adminPanel = document.querySelector(".admin-panel");
+  if (!adminPanel) return;
+  if (!getToken() || getRole() !== "Admin") {
+    ensureMessage(adminPanel, "Admin access required.", "error");
+    return;
+  }
+
+  try {
+    const [stats, users, farms, products, orders, dealers] = await Promise.all([
+      apiFetch("/api/admin/stats", { auth: true }),
+      apiFetch("/api/admin/users", { auth: true }),
+      apiFetch("/api/admin/farms", { auth: true }),
+      apiFetch("/api/admin/products", { auth: true }),
+      apiFetch("/api/admin/orders", { auth: true }),
+      apiFetch("/api/admin/dealers", { auth: true }),
+    ]);
+
+    const totalUsers = document.getElementById("totalUsers");
+    const totalFarms = document.getElementById("totalFarms");
+    if (totalUsers) totalUsers.textContent = stats.total_users ?? 0;
+    if (totalFarms) totalFarms.textContent = stats.total_farms ?? 0;
+
+    const usersList = document.getElementById("usersList");
+    if (usersList) {
+      usersList.innerHTML = "";
+      (users.users || []).forEach((user) => {
+        const li = document.createElement("li");
+        li.innerHTML = `<span>${escapeHtml(user.name)} - ${escapeHtml(user.role)}</span>`;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "Delete";
+        button.addEventListener("click", async () => {
+          if (!window.confirm(`Delete ${user.name}?`)) return;
+          try {
+            await apiFetch(`/api/admin/users/${user.id}`, { method: "DELETE", auth: true });
+            await loadAdminPanel();
+          } catch (error) {
+            notify(error.message);
+          }
+        });
+        li.appendChild(button);
+        usersList.appendChild(li);
+      });
+    }
+
+    const farmsList = document.getElementById("farmsList");
+    if (farmsList) {
+      farmsList.innerHTML = "";
+      (farms.farms || []).forEach((farm) => {
+        const li = document.createElement("li");
+        li.textContent = `${farm.farm_name} - ${farm.location}`;
+        farmsList.appendChild(li);
+      });
+    }
+
+    let summary = document.getElementById("admin-summary");
+    if (!summary) {
+      summary = document.createElement("section");
+      summary.id = "admin-summary";
+      adminPanel.appendChild(summary);
+    }
+
+    summary.innerHTML = `
+      <h2>Products</h2>
+      <ul>${(products.products || []).slice(0, 8).map((product) => `<li>${escapeHtml(product.product_name)} - ${escapeHtml(product.farm_name || "")}</li>`).join("") || "<li>No products</li>"}</ul>
+      <h2>Orders</h2>
+      <ul>${(orders.orders || []).slice(0, 8).map((order) => `<li>#${escapeHtml(order.id)} - ${money(order.total_amount)} - ${escapeHtml(order.status)} <button type='button' onclick='deleteOrder(${order.id})'>Delete</button></li>`).join("") || "<li>No orders</li>"}</ul>
+      <h2>Dealers</h2>
+      <ul>${(dealers.dealers || []).slice(0, 8).map((dealer) => `<li>${escapeHtml(dealer.dealer_name)} - ${escapeHtml(dealer.shop_name)} - ${escapeHtml(dealer.location)}</li>`).join("") || "<li>No dealers</li>"}</ul>
+    `;
+  } catch (error) {
+    ensureMessage(adminPanel, error.message, "error");
+  }
+}
+
+async function deleteUser(userId, userName) {
+  if (!window.confirm(`Delete ${userName || "this user"}?`)) return;
+  try {
+    await apiFetch(`/api/admin/users/${userId}`, { method: "DELETE", auth: true });
+    await loadAdminPanel();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+async function deleteOrder(orderId, orderName) {
+  if (!window.confirm(`Delete order ${orderName || orderId}?`)) return;
+  try {
+    await apiFetch(`/api/admin/orders/${orderId}`, { method: "DELETE", auth: true });
+    await loadAdminPanel();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+function ensureManageFarmInputs() {
+  const form = document.querySelector(".dashboard");
+  if (!form || document.getElementById("productCategory")) return;
+
+  const productName = document.getElementById("productName");
+  const category = document.createElement("input");
+  category.type = "text";
+  category.id = "productCategory";
+  category.placeholder = "Category";
+  const stock = document.createElement("input");
+  stock.type = "number";
+  stock.id = "productStock";
+  stock.placeholder = "Stock";
+
+  if (productName && productName.parentNode) {
+    productName.insertAdjacentElement("afterend", category);
+    category.insertAdjacentElement("afterend", stock);
+  } else {
+    form.append(category, stock);
+  }
+}
+
+async function addToCart(productOrId, secondArg, quantity = 1, productMeta = null) {
+  const productType = secondArg === "Farm" || secondArg === "Pesticide" ? secondArg : null;
+
+  if (getToken() && productType) {
+    try {
+      const data = await apiFetch("/api/cart", {
+        method: "POST",
+        auth: true,
+        body: {
+          product_id: productOrId,
+          product_type: productType,
+          quantity,
+        },
+      });
+      updateCartCount();
+      notify(data.message || `${productMeta?.product_name || "Item"} added to cart`);
+      return;
+    } catch (error) {
+      notify(error.message);
+      return;
+    }
+  }
+
+  const cart = readJson(localStorage.getItem(GUEST_CART_KEY), []);
+  const productName = productMeta?.product_name || String(productOrId || "Item");
+  const price = productType ? toNumber(productMeta?.price) : toNumber(secondArg);
+  const existing = cart.find((item) => item.product === productName);
+  if (existing) existing.quantity += quantity;
+  else cart.push({ product: productName, price, quantity });
+  localStorage.setItem(GUEST_CART_KEY, JSON.stringify(cart));
+  updateCartCount();
+  notify(`${productName} added to cart`);
+}
+
+async function loadCartFromApi() {
+  const list = document.getElementById("cart-items");
+  if (!list) return false;
+  try {
+    const data = await apiFetch("/api/cart", { auth: true });
+    const items = Array.isArray(data.items) ? data.items : [];
+    list.innerHTML = "";
+    if (!items.length) {
+      list.innerHTML = "<li>Your cart is empty.</li>";
+    } else {
+      items.forEach((item) => list.appendChild(renderCartItem(item, item.id, true)));
+    }
+    const totalPrice = document.getElementById("total-price");
+    if (totalPrice) totalPrice.textContent = `Total: ${money(data.total_amount || 0)}`;
+    updateCartCount(items);
+    return true;
+  } catch (error) {
+    ensureMessage(list.parentElement || list, error.message, "error");
+    return false;
+  }
+}
+
+function loadCartFromLocalStorage() {
+  const list = document.getElementById("cart-items");
+  if (!list) return;
+  const cart = readJson(localStorage.getItem(GUEST_CART_KEY), []);
+  list.innerHTML = "";
+  let total = 0;
+  if (!cart.length) {
+    list.innerHTML = "<li>Your cart is empty.</li>";
+  } else {
+    cart.forEach((item, index) => {
+      total += toNumber(item.price) * toNumber(item.quantity, 1);
+      const li = document.createElement("li");
+      li.innerHTML = `
+        <div>
+          <strong>${escapeHtml(item.product)}</strong>
+          <div>${money(item.price)} x ${toNumber(item.quantity, 1)}</div>
+        </div>
+        <div class="cart-actions"></div>
+      `;
+      const actions = li.querySelector(".cart-actions");
+      const plus = document.createElement("button");
+      plus.type = "button";
+      plus.textContent = "+";
+      plus.addEventListener("click", () => increaseQty(index));
+      const minus = document.createElement("button");
+      minus.type = "button";
+      minus.textContent = "-";
+      minus.addEventListener("click", () => decreaseQty(index));
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "Remove";
+      remove.addEventListener("click", () => removeItem(index));
+      actions.append(plus, minus, remove);
+      list.appendChild(li);
+    });
+  }
+  const totalPrice = document.getElementById("total-price");
+  if (totalPrice) totalPrice.textContent = `Total: ${money(total)}`;
+  updateCartCount();
+}
+
+async function loadCart() {
+  if (getToken()) {
+    const ok = await loadCartFromApi();
+    if (!ok) loadCartFromLocalStorage();
+  } else {
+    loadCartFromLocalStorage();
+  }
+}
+
+async function increaseQty(itemRef, currentQuantity, stock, remote = false) {
+  if (remote || (typeof itemRef === "number" && getToken())) {
+    const nextQuantity = toNumber(currentQuantity, 1) + 1;
+    if (stock != null && nextQuantity > toNumber(stock)) {
+      notify("Requested quantity exceeds stock");
+      return;
+    }
+    try {
+      await apiFetch(`/api/cart/${itemRef}`, { method: "PUT", auth: true, body: { quantity: nextQuantity } });
+      await loadCart();
+    } catch (error) {
+      notify(error.message);
+    }
+    return;
+  }
+
+  const cart = readJson(localStorage.getItem(GUEST_CART_KEY), []);
+  if (!cart[itemRef]) return;
+  cart[itemRef].quantity += 1;
+  localStorage.setItem(GUEST_CART_KEY, JSON.stringify(cart));
+  loadCartFromLocalStorage();
+}
+
+async function decreaseQty(itemRef, currentQuantity, remote = false) {
+  if (remote || (typeof itemRef === "number" && getToken())) {
+    const nextQuantity = toNumber(currentQuantity, 1) - 1;
+    if (nextQuantity < 1) {
+      await removeItem(itemRef, true);
+      return;
+    }
+    try {
+      await apiFetch(`/api/cart/${itemRef}`, { method: "PUT", auth: true, body: { quantity: nextQuantity } });
+      await loadCart();
+    } catch (error) {
+      notify(error.message);
+    }
+    return;
+  }
+
+  const cart = readJson(localStorage.getItem(GUEST_CART_KEY), []);
+  if (!cart[itemRef]) return;
+  if (cart[itemRef].quantity > 1) cart[itemRef].quantity -= 1;
+  else cart.splice(itemRef, 1);
+  localStorage.setItem(GUEST_CART_KEY, JSON.stringify(cart));
+  loadCartFromLocalStorage();
+}
+
+async function removeItem(itemRef, remote = false) {
+  if (remote || (typeof itemRef === "number" && getToken())) {
+    try {
+      await apiFetch(`/api/cart/${itemRef}`, { method: "DELETE", auth: true });
+      await loadCart();
+    } catch (error) {
+      notify(error.message);
+    }
+    return;
+  }
+
+  const cart = readJson(localStorage.getItem(GUEST_CART_KEY), []);
+  cart.splice(itemRef, 1);
+  localStorage.setItem(GUEST_CART_KEY, JSON.stringify(cart));
+  loadCartFromLocalStorage();
+}
+
+async function clearCart() {
+  if (getToken()) {
+    try {
+      const data = await apiFetch("/api/cart", { auth: true });
+      const items = Array.isArray(data.items) ? data.items : [];
+      await Promise.all(items.map((item) => apiFetch(`/api/cart/${item.id}`, { method: "DELETE", auth: true })));
+    } catch {
+      // ignore and fall back to local clear
+    }
+  }
+  localStorage.removeItem(GUEST_CART_KEY);
+  await loadCart();
+}
+
+async function handleCheckout(event) {
+  event.preventDefault();
+  if (!getToken()) {
+    notify("Please log in before placing an order.");
+    window.location.href = "login.html";
+    return;
+  }
+  try {
+    const data = await apiFetch("/api/orders", { method: "POST", auth: true });
+    ensureMessage(event.currentTarget, data.message || "Order placed successfully", "success");
+    await clearCart();
+    await loadOrdersSection();
+  } catch (error) {
+    ensureMessage(event.currentTarget, error.message, "error");
+  }
+}
+
+function renderOrders(parent, orders) {
+  if (!parent) return;
+  parent.innerHTML = "";
+  if (!orders.length) {
+    parent.innerHTML = "<li>No orders found.</li>";
+    return;
+  }
+
+  orders.forEach((order) => {
+    const card = document.createElement("div");
+    card.className = "product";
+    const items = Array.isArray(order.items) && order.items.length
+      ? `<ul>${order.items.map((item) => `<li>${escapeHtml(item.product_name)} x ${escapeHtml(item.quantity)} (${money(item.price)})</li>`).join("")}</ul>`
+      : "";
+    card.innerHTML = `
+      <h3>Order #${escapeHtml(order.id)}</h3>
+      <p><strong>Status:</strong> ${escapeHtml(order.status)}</p>
+      <p><strong>Total:</strong> ${money(order.total_amount)}</p>
+      <p><strong>Created:</strong> ${escapeHtml(order.created_at || "")}</p>
+      ${order.buyer_name ? `<p><strong>Buyer:</strong> ${escapeHtml(order.buyer_name)}</p>` : ""}
+      ${items}
+    `;
+    if (getRole() === "Farmer" || getRole() === "Admin") {
+      const select = document.createElement("select");
+      select.id = `order-status-${order.id}`;
+      ["Pending", "Shipped", "Delivered"].forEach((status) => {
+        const option = document.createElement("option");
+        option.value = status;
+        option.textContent = status;
+        if (status === order.status) option.selected = true;
+        select.appendChild(option);
+      });
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "Update Status";
+      button.addEventListener("click", () => updateOrderStatus(order.id));
+      card.append(select, button);
+    }
+    parent.appendChild(card);
+  });
+}
+
+async function loadOrdersSection() {
+  const parent = document.querySelector(".cart-page") || document.querySelector(".checkout") || document.querySelector(".admin-panel");
+  if (!parent || !getToken()) return;
+
+  let section = document.getElementById("order-history-section");
+  if (!section) {
+    section = document.createElement("section");
+    section.id = "order-history-section";
+    section.innerHTML = "<h2>My Orders</h2><ul id='order-history'></ul>";
+    parent.appendChild(section);
+  }
+
+  const list = section.querySelector("#order-history");
+  try {
+    const data = await apiFetch("/api/orders", { auth: true });
+    renderOrders(list, Array.isArray(data.orders) ? data.orders : []);
+  } catch (error) {
+    ensureMessage(section, error.message, "error");
+  }
+}
+
+async function loadOrders() {
+  await loadOrdersSection();
+}
+
+async function updateOrderStatus(orderId) {
+  const select = document.getElementById(`order-status-${orderId}`);
+  if (!select) return;
+  try {
+    await apiFetch(`/api/orders/${orderId}`, { method: "PUT", auth: true, body: { status: select.value } });
+    await loadAdminPanel();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+async function loadAdminPanel() {
+  const adminPanel = document.querySelector(".admin-panel");
+  if (!adminPanel) return;
+  if (!getToken() || getRole() !== "Admin") {
+    ensureMessage(adminPanel, "Admin access required.", "error");
+    return;
+  }
+
+  try {
+    const [stats, users, farms, products, orders, dealers] = await Promise.all([
+      apiFetch("/api/admin/stats", { auth: true }),
+      apiFetch("/api/admin/users", { auth: true }),
+      apiFetch("/api/admin/farms", { auth: true }),
+      apiFetch("/api/admin/products", { auth: true }),
+      apiFetch("/api/admin/orders", { auth: true }),
+      apiFetch("/api/admin/dealers", { auth: true }),
+    ]);
+
+    const totalUsers = document.getElementById("totalUsers");
+    const totalFarms = document.getElementById("totalFarms");
+    if (totalUsers) totalUsers.textContent = stats.total_users ?? 0;
+    if (totalFarms) totalFarms.textContent = stats.total_farms ?? 0;
+
+    const usersList = document.getElementById("usersList");
+    if (usersList) {
+      usersList.innerHTML = "";
+      (users.users || []).forEach((user) => {
+        const li = document.createElement("li");
+        li.innerHTML = `<span>${escapeHtml(user.name)} - ${escapeHtml(user.role)}</span>`;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "Delete";
+        button.addEventListener("click", async () => {
+          if (!window.confirm(`Delete ${user.name}?`)) return;
+          try {
+            await apiFetch(`/api/admin/users/${user.id}`, { method: "DELETE", auth: true });
+            await loadAdminPanel();
+          } catch (error) {
+            notify(error.message);
+          }
+        });
+        li.appendChild(button);
+        usersList.appendChild(li);
+      });
+    }
+
+    const farmsList = document.getElementById("farmsList");
+    if (farmsList) {
+      farmsList.innerHTML = "";
+      (farms.farms || []).forEach((farm) => {
+        const li = document.createElement("li");
+        li.textContent = `${farm.farm_name} - ${farm.location}`;
+        farmsList.appendChild(li);
+      });
+    }
+
+    let summary = document.getElementById("admin-summary");
+    if (!summary) {
+      summary = document.createElement("section");
+      summary.id = "admin-summary";
+      adminPanel.appendChild(summary);
+    }
+
+    summary.innerHTML = `
+      <h2>Products</h2>
+      <ul>${(products.products || []).slice(0, 8).map((product) => `<li>${escapeHtml(product.product_name)} - ${escapeHtml(product.farm_name || "")}</li>`).join("") || "<li>No products</li>"}</ul>
+      <h2>Orders</h2>
+      <ul>${(orders.orders || []).slice(0, 8).map((order) => `<li>#${escapeHtml(order.id)} - ${money(order.total_amount)} - ${escapeHtml(order.status)} <button type='button' onclick='deleteOrder(${order.id})'>Delete</button></li>`).join("") || "<li>No orders</li>"}</ul>
+      <h2>Dealers</h2>
+      <ul>${(dealers.dealers || []).slice(0, 8).map((dealer) => `<li>${escapeHtml(dealer.dealer_name)} - ${escapeHtml(dealer.shop_name)} - ${escapeHtml(dealer.location)}</li>`).join("") || "<li>No dealers</li>"}</ul>
+    `;
+  } catch (error) {
+    ensureMessage(adminPanel, error.message, "error");
+  }
+}
+
+async function deleteUser(userId, userName) {
+  if (!window.confirm(`Delete ${userName || "this user"}?`)) return;
+  try {
+    await apiFetch(`/api/admin/users/${userId}`, { method: "DELETE", auth: true });
+    await loadAdminPanel();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+async function deleteOrder(orderId, orderName) {
+  if (!window.confirm(`Delete order ${orderName || orderId}?`)) return;
+  try {
+    await apiFetch(`/api/admin/orders/${orderId}`, { method: "DELETE", auth: true });
+    await loadAdminPanel();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+function ensureManageFarmInputs() {
+  const form = document.querySelector(".dashboard");
+  if (!form || document.getElementById("productCategory")) return;
+
+  const productName = document.getElementById("productName");
+  const category = document.createElement("input");
+  category.type = "text";
+  category.id = "productCategory";
+  category.placeholder = "Category";
+  const stock = document.createElement("input");
+  stock.type = "number";
+  stock.id = "productStock";
+  stock.placeholder = "Stock";
+
+  if (productName && productName.parentNode) {
+    productName.insertAdjacentElement("afterend", category);
+    category.insertAdjacentElement("afterend", stock);
+  } else {
+    form.append(category, stock);
+  }
+}
+
+async function addToCart(productOrId, secondArg, quantity = 1, productMeta = null) {
+  const productType = secondArg === "Farm" || secondArg === "Pesticide" ? secondArg : null;
+
+  if (getToken() && productType) {
+    try {
+      const data = await apiFetch("/api/cart", {
+        method: "POST",
+        auth: true,
+        body: {
+          product_id: productOrId,
+          product_type: productType,
+          quantity,
+        },
+      });
+      updateCartCount();
+      notify(data.message || `${productMeta?.product_name || "Item"} added to cart`);
+      return;
+    } catch (error) {
+      notify(error.message);
+      return;
+    }
+  }
+
+  const cart = readJson(localStorage.getItem(GUEST_CART_KEY), []);
+  const productName = productMeta?.product_name || String(productOrId || "Item");
+  const price = productType ? toNumber(productMeta?.price) : toNumber(secondArg);
+  const existing = cart.find((item) => item.product === productName);
+  if (existing) existing.quantity += quantity;
+  else cart.push({ product: productName, price, quantity });
+  localStorage.setItem(GUEST_CART_KEY, JSON.stringify(cart));
+  updateCartCount();
+  notify(`${productName} added to cart`);
+}
+
+async function loadCartFromApi() {
+  const list = document.getElementById("cart-items");
+  if (!list) return false;
+  try {
+    const data = await apiFetch("/api/cart", { auth: true });
+    const items = Array.isArray(data.items) ? data.items : [];
+    list.innerHTML = "";
+    if (!items.length) {
+      list.innerHTML = "<li>Your cart is empty.</li>";
+    } else {
+      items.forEach((item) => list.appendChild(renderCartItem(item, item.id, true)));
+    }
+    const totalPrice = document.getElementById("total-price");
+    if (totalPrice) totalPrice.textContent = `Total: ${money(data.total_amount || 0)}`;
+    updateCartCount(items);
+    return true;
+  } catch (error) {
+    ensureMessage(list.parentElement || list, error.message, "error");
+    return false;
+  }
+}
+
+function loadCartFromLocalStorage() {
+  const list = document.getElementById("cart-items");
+  if (!list) return;
+  const cart = readJson(localStorage.getItem(GUEST_CART_KEY), []);
+  list.innerHTML = "";
+  let total = 0;
+  if (!cart.length) {
+    list.innerHTML = "<li>Your cart is empty.</li>";
+  } else {
+    cart.forEach((item, index) => {
+      total += toNumber(item.price) * toNumber(item.quantity, 1);
+      const li = document.createElement("li");
+      li.innerHTML = `
+        <div>
+          <strong>${escapeHtml(item.product)}</strong>
+          <div>${money(item.price)} x ${toNumber(item.quantity, 1)}</div>
+        </div>
+        <div class="cart-actions"></div>
+      `;
+      const actions = li.querySelector(".cart-actions");
+      const plus = document.createElement("button");
+      plus.type = "button";
+      plus.textContent = "+";
+      plus.addEventListener("click", () => increaseQty(index));
+      const minus = document.createElement("button");
+      minus.type = "button";
+      minus.textContent = "-";
+      minus.addEventListener("click", () => decreaseQty(index));
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "Remove";
+      remove.addEventListener("click", () => removeItem(index));
+      actions.append(plus, minus, remove);
+      list.appendChild(li);
+    });
+  }
+  const totalPrice = document.getElementById("total-price");
+  if (totalPrice) totalPrice.textContent = `Total: ${money(total)}`;
+  updateCartCount();
+}
+
+async function loadCart() {
+  if (getToken()) {
+    const ok = await loadCartFromApi();
+    if (!ok) loadCartFromLocalStorage();
+  } else {
+    loadCartFromLocalStorage();
+  }
+}
+
+async function increaseQty(itemRef, currentQuantity, stock, remote = false) {
+  if (remote || (typeof itemRef === "number" && getToken())) {
+    const nextQuantity = toNumber(currentQuantity, 1) + 1;
+    if (stock != null && nextQuantity > toNumber(stock)) {
+      notify("Requested quantity exceeds stock");
+      return;
+    }
+    try {
+      await apiFetch(`/api/cart/${itemRef}`, { method: "PUT", auth: true, body: { quantity: nextQuantity } });
+      await loadCart();
+    } catch (error) {
+      notify(error.message);
+    }
+    return;
+  }
+
+  const cart = readJson(localStorage.getItem(GUEST_CART_KEY), []);
+  if (!cart[itemRef]) return;
+  cart[itemRef].quantity += 1;
+  localStorage.setItem(GUEST_CART_KEY, JSON.stringify(cart));
+  loadCartFromLocalStorage();
+}
+
+async function decreaseQty(itemRef, currentQuantity, remote = false) {
+  if (remote || (typeof itemRef === "number" && getToken())) {
+    const nextQuantity = toNumber(currentQuantity, 1) - 1;
+    if (nextQuantity < 1) {
+      await removeItem(itemRef, true);
+      return;
+    }
+    try {
+      await apiFetch(`/api/cart/${itemRef}`, { method: "PUT", auth: true, body: { quantity: nextQuantity } });
+      await loadCart();
+    } catch (error) {
+      notify(error.message);
+    }
+    return;
+  }
+
+  const cart = readJson(localStorage.getItem(GUEST_CART_KEY), []);
+  if (!cart[itemRef]) return;
+  if (cart[itemRef].quantity > 1) cart[itemRef].quantity -= 1;
+  else cart.splice(itemRef, 1);
+  localStorage.setItem(GUEST_CART_KEY, JSON.stringify(cart));
+  loadCartFromLocalStorage();
+}
+
+async function removeItem(itemRef, remote = false) {
+  if (remote || (typeof itemRef === "number" && getToken())) {
+    try {
+      await apiFetch(`/api/cart/${itemRef}`, { method: "DELETE", auth: true });
+      await loadCart();
+    } catch (error) {
+      notify(error.message);
+    }
+    return;
+  }
+
+  const cart = readJson(localStorage.getItem(GUEST_CART_KEY), []);
+  cart.splice(itemRef, 1);
+  localStorage.setItem(GUEST_CART_KEY, JSON.stringify(cart));
+  loadCartFromLocalStorage();
+}
+
+async function clearCart() {
+  if (getToken()) {
+    try {
+      const data = await apiFetch("/api/cart", { auth: true });
+      const items = Array.isArray(data.items) ? data.items : [];
+      await Promise.all(items.map((item) => apiFetch(`/api/cart/${item.id}`, { method: "DELETE", auth: true })));
+    } catch {
+      // ignore and fall back to local clear
+    }
+  }
+  localStorage.removeItem(GUEST_CART_KEY);
+  await loadCart();
+}
+
+async function handleCheckout(event) {
+  event.preventDefault();
+  if (!getToken()) {
+    notify("Please log in before placing an order.");
+    window.location.href = "login.html";
+    return;
+  }
+  try {
+    const data = await apiFetch("/api/orders", { method: "POST", auth: true });
+    ensureMessage(event.currentTarget, data.message || "Order placed successfully", "success");
+    await clearCart();
+    await loadOrdersSection();
+  } catch (error) {
+    ensureMessage(event.currentTarget, error.message, "error");
+  }
+}
+
+function renderOrders(parent, orders) {
+  if (!parent) return;
+  parent.innerHTML = "";
+  if (!orders.length) {
+    parent.innerHTML = "<li>No orders found.</li>";
+    return;
+  }
+
+  orders.forEach((order) => {
+    const card = document.createElement("div");
+    card.className = "product";
+    const items = Array.isArray(order.items) && order.items.length
+      ? `<ul>${order.items.map((item) => `<li>${escapeHtml(item.product_name)} x ${escapeHtml(item.quantity)} (${money(item.price)})</li>`).join("")}</ul>`
+      : "";
+    card.innerHTML = `
+      <h3>Order #${escapeHtml(order.id)}</h3>
+      <p><strong>Status:</strong> ${escapeHtml(order.status)}</p>
+      <p><strong>Total:</strong> ${money(order.total_amount)}</p>
+      <p><strong>Created:</strong> ${escapeHtml(order.created_at || "")}</p>
+      ${order.buyer_name ? `<p><strong>Buyer:</strong> ${escapeHtml(order.buyer_name)}</p>` : ""}
+      ${items}
+    `;
+    if (getRole() === "Farmer" || getRole() === "Admin") {
+      const select = document.createElement("select");
+      select.id = `order-status-${order.id}`;
+      ["Pending", "Shipped", "Delivered"].forEach((status) => {
+        const option = document.createElement("option");
+        option.value = status;
+        option.textContent = status;
+        if (status === order.status) option.selected = true;
+        select.appendChild(option);
+      });
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "Update Status";
+      button.addEventListener("click", () => updateOrderStatus(order.id));
+      card.append(select, button);
+    }
+    parent.appendChild(card);
+  });
+}
+
+async function loadOrdersSection() {
+  const parent = document.querySelector(".cart-page") || document.querySelector(".checkout") || document.querySelector(".admin-panel");
+  if (!parent || !getToken()) return;
+
+  let section = document.getElementById("order-history-section");
+  if (!section) {
+    section = document.createElement("section");
+    section.id = "order-history-section";
+    section.innerHTML = "<h2>My Orders</h2><ul id='order-history'></ul>";
+    parent.appendChild(section);
+  }
+
+  const list = section.querySelector("#order-history");
+  try {
+    const data = await apiFetch("/api/orders", { auth: true });
+    renderOrders(list, Array.isArray(data.orders) ? data.orders : []);
+  } catch (error) {
+    ensureMessage(section, error.message, "error");
+  }
+}
+
+async function loadOrders() {
+  await loadOrdersSection();
+}
+
+async function updateOrderStatus(orderId) {
+  const select = document.getElementById(`order-status-${orderId}`);
+  if (!select) return;
+  try {
+    await apiFetch(`/api/orders/${orderId}`, { method: "PUT", auth: true, body: { status: select.value } });
+    await loadAdminPanel();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+async function loadAdminPanel() {
+  const adminPanel = document.querySelector(".admin-panel");
+  if (!adminPanel) return;
+  if (!getToken() || getRole() !== "Admin") {
+    ensureMessage(adminPanel, "Admin access required.", "error");
+    return;
+  }
+
+  try {
+    const [stats, users, farms, products, orders, dealers] = await Promise.all([
+      apiFetch("/api/admin/stats", { auth: true }),
+      apiFetch("/api/admin/users", { auth: true }),
+      apiFetch("/api/admin/farms", { auth: true }),
+      apiFetch("/api/admin/products", { auth: true }),
+      apiFetch("/api/admin/orders", { auth: true }),
+      apiFetch("/api/admin/dealers", { auth: true }),
+    ]);
+
+    const totalUsers = document.getElementById("totalUsers");
+    const totalFarms = document.getElementById("totalFarms");
+    if (totalUsers) totalUsers.textContent = stats.total_users ?? 0;
+    if (totalFarms) totalFarms.textContent = stats.total_farms ?? 0;
+
+    const usersList = document.getElementById("usersList");
+    if (usersList) {
+      usersList.innerHTML = "";
+      (users.users || []).forEach((user) => {
+        const li = document.createElement("li");
+        li.innerHTML = `<span>${escapeHtml(user.name)} - ${escapeHtml(user.role)}</span>`;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "Delete";
+        button.addEventListener("click", async () => {
+          if (!window.confirm(`Delete ${user.name}?`)) return;
+          try {
+            await apiFetch(`/api/admin/users/${user.id}`, { method: "DELETE", auth: true });
+            await loadAdminPanel();
+          } catch (error) {
+            notify(error.message);
+          }
+        });
+        li.appendChild(button);
+        usersList.appendChild(li);
+      });
+    }
+
+    const farmsList = document.getElementById("farmsList");
+    if (farmsList) {
+      farmsList.innerHTML = "";
+      (farms.farms || []).forEach((farm) => {
+        const li = document.createElement("li");
+        li.textContent = `${farm.farm_name} - ${farm.location}`;
+        farmsList.appendChild(li);
+      });
+    }
+
+    let summary = document.getElementById("admin-summary");
+    if (!summary) {
+      summary = document.createElement("section");
+      summary.id = "admin-summary";
+      adminPanel.appendChild(summary);
+    }
+
+    summary.innerHTML = `
+      <h2>Products</h2>
+      <ul>${(products.products || []).slice(0, 8).map((product) => `<li>${escapeHtml(product.product_name)} - ${escapeHtml(product.farm_name || "")}</li>`).join("") || "<li>No products</li>"}</ul>
+      <h2>Orders</h2>
+      <ul>${(orders.orders || []).slice(0, 8).map((order) => `<li>#${escapeHtml(order.id)} - ${money(order.total_amount)} - ${escapeHtml(order.status)} <button type='button' onclick='deleteOrder(${order.id})'>Delete</button></li>`).join("") || "<li>No orders</li>"}</ul>
+      <h2>Dealers</h2>
+      <ul>${(dealers.dealers || []).slice(0, 8).map((dealer) => `<li>${escapeHtml(dealer.dealer_name)} - ${escapeHtml(dealer.shop_name)} - ${escapeHtml(dealer.location)}</li>`).join("") || "<li>No dealers</li>"}</ul>
+    `;
+  } catch (error) {
+    ensureMessage(adminPanel, error.message, "error");
+  }
+}
+
+async function deleteUser(userId, userName) {
+  if (!window.confirm(`Delete ${userName || "this user"}?`)) return;
+  try {
+    await apiFetch(`/api/admin/users/${userId}`, { method: "DELETE", auth: true });
+    await loadAdminPanel();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+async function deleteOrder(orderId, orderName) {
+  if (!window.confirm(`Delete order ${orderName || orderId}?`)) return;
+  try {
+    await apiFetch(`/api/admin/orders/${orderId}`, { method: "DELETE", auth: true });
+    await loadAdminPanel();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+function ensureManageFarmInputs() {
+  const form = document.querySelector(".dashboard");
+  if (!form || document.getElementById("productCategory")) return;
+
+  const productName = document.getElementById("productName");
+  const category = document.createElement("input");
+  category.type = "text";
+  category.id = "productCategory";
+  category.placeholder = "Category";
+  const stock = document.createElement("input");
+  stock.type = "number";
+  stock.id = "productStock";
+  stock.placeholder = "Stock";
+
+  if (productName && productName.parentNode) {
+    productName.insertAdjacentElement("afterend", category);
+    category.insertAdjacentElement("afterend", stock);
+  } else {
+    form.append(category, stock);
+  }
+}
+
+async function addToCart(productOrId, secondArg, quantity = 1, productMeta = null) {
+  const productType = secondArg === "Farm" || secondArg === "Pesticide" ? secondArg : null;
+
+  if (getToken() && productType) {
+    try {
+      const data = await apiFetch("/api/cart", {
+        method: "POST",
+        auth: true,
+        body: {
+          product_id: productOrId,
+          product_type: productType,
+          quantity,
+        },
+      });
+      updateCartCount();
+      notify(data.message || `${productMeta?.product_name || "Item"} added to cart`);
+      return;
+    } catch (error) {
+      notify(error.message);
+      return;
+    }
+  }
+
+  const cart = readJson(localStorage.getItem(GUEST_CART_KEY), []);
+  const productName = productMeta?.product_name || String(productOrId || "Item");
+  const price = productType ? toNumber(productMeta?.price) : toNumber(secondArg);
+  const existing = cart.find((item) => item.product === productName);
+  if (existing) existing.quantity += quantity;
+  else cart.push({ product: productName, price, quantity });
+  localStorage.setItem(GUEST_CART_KEY, JSON.stringify(cart));
+  updateCartCount();
+  notify(`${productName} added to cart`);
+}
+
+async function loadCartFromApi() {
+  const list = document.getElementById("cart-items");
+  if (!list) return false;
+  try {
+    const data = await apiFetch("/api/cart", { auth: true });
+    const items = Array.isArray(data.items) ? data.items : [];
+    list.innerHTML = "";
+    if (!items.length) {
+      list.innerHTML = "<li>Your cart is empty.</li>";
+    } else {
+      items.forEach((item) => list.appendChild(renderCartItem(item, item.id, true)));
+    }
+    const totalPrice = document.getElementById("total-price");
+    if (totalPrice) totalPrice.textContent = `Total: ${money(data.total_amount || 0)}`;
+    updateCartCount(items);
+    return true;
+  } catch (error) {
+    ensureMessage(list.parentElement || list, error.message, "error");
+    return false;
+  }
+}
+
+function loadCartFromLocalStorage() {
+  const list = document.getElementById("cart-items");
+  if (!list) return;
+  const cart = readJson(localStorage.getItem(GUEST_CART_KEY), []);
+  list.innerHTML = "";
+  let total = 0;
+  if (!cart.length) {
+    list.innerHTML = "<li>Your cart is empty.</li>";
+  } else {
+    cart.forEach((item, index) => {
+      total += toNumber(item.price) * toNumber(item.quantity, 1);
+      const li = document.createElement("li");
+      li.innerHTML = `
+        <div>
+          <strong>${escapeHtml(item.product)}</strong>
+          <div>${money(item.price)} x ${toNumber(item.quantity, 1)}</div>
+        </div>
+        <div class="cart-actions"></div>
+      `;
+      const actions = li.querySelector(".cart-actions");
+      const plus = document.createElement("button");
+      plus.type = "button";
+      plus.textContent = "+";
+      plus.addEventListener("click", () => increaseQty(index));
+      const minus = document.createElement("button");
+      minus.type = "button";
+      minus.textContent = "-";
+      minus.addEventListener("click", () => decreaseQty(index));
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "Remove";
+      remove.addEventListener("click", () => removeItem(index));
+      actions.append(plus, minus, remove);
+      list.appendChild(li);
+    });
+  }
+  const totalPrice = document.getElementById("total-price");
+  if (totalPrice) totalPrice.textContent = `Total: ${money(total)}`;
+  updateCartCount();
+}
+
+async function loadCart() {
+  if (getToken()) {
+    const ok = await loadCartFromApi();
+    if (!ok) loadCartFromLocalStorage();
+  } else {
+    loadCartFromLocalStorage();
+  }
+}
+
+async function increaseQty(itemRef, currentQuantity, stock, remote = false) {
+  if (remote || (typeof itemRef === "number" && getToken())) {
+    const nextQuantity = toNumber(currentQuantity, 1) + 1;
+    if (stock != null && nextQuantity > toNumber(stock)) {
+      notify("Requested quantity exceeds stock");
+      return;
+    }
+    try {
+      await apiFetch(`/api/cart/${itemRef}`, { method: "PUT", auth: true, body: { quantity: nextQuantity } });
+      await loadCart();
+    } catch (error) {
+      notify(error.message);
+    }
+    return;
+  }
+
+  const cart = readJson(localStorage.getItem(GUEST_CART_KEY), []);
+  if (!cart[itemRef]) return;
+  cart[itemRef].quantity += 1;
+  localStorage.setItem(GUEST_CART_KEY, JSON.stringify(cart));
+  loadCartFromLocalStorage();
+}
+
+async function decreaseQty(itemRef, currentQuantity, remote = false) {
+  if (remote || (typeof itemRef === "number" && getToken())) {
+    const nextQuantity = toNumber(currentQuantity, 1) - 1;
+    if (nextQuantity < 1) {
+      await removeItem(itemRef, true);
+      return;
+    }
+    try {
+      await apiFetch(`/api/cart/${itemRef}`, { method: "PUT", auth: true, body: { quantity: nextQuantity } });
+      await loadCart();
+    } catch (error) {
+      notify(error.message);
+    }
+    return;
+  }
+
+  const cart = readJson(localStorage.getItem(GUEST_CART_KEY), []);
+  if (!cart[itemRef]) return;
+  if (cart[itemRef].quantity > 1) cart[itemRef].quantity -= 1;
+  else cart.splice(itemRef, 1);
+  localStorage.setItem(GUEST_CART_KEY, JSON.stringify(cart));
+  loadCartFromLocalStorage();
+}
+
+async function removeItem(itemRef, remote = false) {
+  if (remote || (typeof itemRef === "number" && getToken())) {
+    try {
+      await apiFetch(`/api/cart/${itemRef}`, { method: "DELETE", auth: true });
+      await loadCart();
+    } catch (error) {
+      notify(error.message);
+    }
+    return;
+  }
+
+  const cart = readJson(localStorage.getItem(GUEST_CART_KEY), []);
+  cart.splice(itemRef, 1);
+  localStorage.setItem(GUEST_CART_KEY, JSON.stringify(cart));
+  loadCartFromLocalStorage();
+}
+
+async function clearCart() {
+  if (getToken()) {
+    try {
+      const data = await apiFetch("/api/cart", { auth: true });
+      const items = Array.isArray(data.items) ? data.items : [];
+      await Promise.all(items.map((item) => apiFetch(`/api/cart/${item.id}`, { method: "DELETE", auth: true })));
+    } catch {
+      // ignore and fall back to local clear
+    }
+  }
+  localStorage.removeItem(GUEST_CART_KEY);
+  await loadCart();
+}
+
+async function handleCheckout(event) {
+  event.preventDefault();
+  if (!getToken()) {
+    notify("Please log in before placing an order.");
+    window.location.href = "login.html";
+    return;
+  }
+  try {
+    const data = await apiFetch("/api/orders", { method: "POST", auth: true });
+    ensureMessage(event.currentTarget, data.message || "Order placed successfully", "success");
+    await clearCart();
+    await loadOrdersSection();
+  } catch (error) {
+    ensureMessage(event.currentTarget, error.message, "error");
+  }
+}
+
+function renderOrders(parent, orders) {
+  if (!parent) return;
+  parent.innerHTML = "";
+  if (!orders.length) {
+    parent.innerHTML = "<li>No orders found.</li>";
+    return;
+  }
+
+  orders.forEach((order) => {
+    const card = document.createElement("div");
+    card.className = "product";
+    const items = Array.isArray(order.items) && order.items.length
+      ? `<ul>${order.items.map((item) => `<li>${escapeHtml(item.product_name)} x ${escapeHtml(item.quantity)} (${money(item.price)})</li>`).join("")}</ul>`
+      : "";
+    card.innerHTML = `
+      <h3>Order #${escapeHtml(order.id)}</h3>
+      <p><strong>Status:</strong> ${escapeHtml(order.status)}</p>
+      <p><strong>Total:</strong> ${money(order.total_amount)}</p>
+      <p><strong>Created:</strong> ${escapeHtml(order.created_at || "")}</p>
+      ${order.buyer_name ? `<p><strong>Buyer:</strong> ${escapeHtml(order.buyer_name)}</p>` : ""}
+      ${items}
+    `;
+    if (getRole() === "Farmer" || getRole() === "Admin") {
+      const select = document.createElement("select");
+      select.id = `order-status-${order.id}`;
+      ["Pending", "Shipped", "Delivered"].forEach((status) => {
+        const option = document.createElement("option");
+        option.value = status;
+        option.textContent = status;
+        if (status === order.status) option.selected = true;
+        select.appendChild(option);
+      });
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "Update Status";
+      button.addEventListener("click", () => updateOrderStatus(order.id));
+      card.append(select, button);
+    }
+    parent.appendChild(card);
+  });
+}
+
+async function loadOrdersSection() {
+  const parent = document.querySelector(".cart-page") || document.querySelector(".checkout") || document.querySelector(".admin-panel");
+  if (!parent || !getToken()) return;
+
+  let section = document.getElementById("order-history-section");
+  if (!section) {
+    section = document.createElement("section");
+    section.id = "order-history-section";
+    section.innerHTML = "<h2>My Orders</h2><ul id='order-history'></ul>";
+    parent.appendChild(section);
+  }
+
+  const list = section.querySelector("#order-history");
+  try {
+    const data = await apiFetch("/api/orders", { auth: true });
+    renderOrders(list, Array.isArray(data.orders) ? data.orders : []);
+  } catch (error) {
+    ensureMessage(section, error.message, "error");
+  }
+}
+
+async function loadOrders() {
+  await loadOrdersSection();
+}
+
+async function updateOrderStatus(orderId) {
+  const select = document.getElementById(`order-status-${orderId}`);
+  if (!select) return;
+  try {
+    await apiFetch(`/api/orders/${orderId}`, { method: "PUT", auth: true, body: { status: select.value } });
+    await loadAdminPanel();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+async function loadAdminPanel() {
+  const adminPanel = document.querySelector(".admin-panel");
+  if (!adminPanel) return;
+  if (!getToken() || getRole() !== "Admin") {
+    ensureMessage(adminPanel, "Admin access required.", "error");
+    return;
+  }
+
+  try {
+    const [stats, users, farms, products, orders, dealers] = await Promise.all([
+      apiFetch("/api/admin/stats", { auth: true }),
+      apiFetch("/api/admin/users", { auth: true }),
+      apiFetch("/api/admin/farms", { auth: true }),
+      apiFetch("/api/admin/products", { auth: true }),
+      apiFetch("/api/admin/orders", { auth: true }),
+      apiFetch("/api/admin/dealers", { auth: true }),
+    ]);
+
+    const totalUsers = document.getElementById("totalUsers");
+    const totalFarms = document.getElementById("totalFarms");
+    if (totalUsers) totalUsers.textContent = stats.total_users ?? 0;
+    if (totalFarms) totalFarms.textContent = stats.total_farms ?? 0;
+
+    const usersList = document.getElementById("usersList");
+    if (usersList) {
+      usersList.innerHTML = "";
+      (users.users || []).forEach((user) => {
+        const li = document.createElement("li");
+        li.innerHTML = `<span>${escapeHtml(user.name)} - ${escapeHtml(user.role)}</span>`;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "Delete";
+        button.addEventListener("click", async () => {
+          if (!window.confirm(`Delete ${user.name}?`)) return;
+          try {
+            await apiFetch(`/api/admin/users/${user.id}`, { method: "DELETE", auth: true });
+            await loadAdminPanel();
+          } catch (error) {
+            notify(error.message);
+          }
+        });
+        li.appendChild(button);
+        usersList.appendChild(li);
+      });
+    }
+
+    const farmsList = document.getElementById("farmsList");
+    if (farmsList) {
+      farmsList.innerHTML = "";
+      (farms.farms || []).forEach((farm) => {
+        const li = document.createElement("li");
+        li.textContent = `${farm.farm_name} - ${farm.location}`;
+        farmsList.appendChild(li);
+      });
+    }
+
+    let summary = document.getElementById("admin-summary");
+    if (!summary) {
+      summary = document.createElement("section");
+      summary.id = "admin-summary";
+      adminPanel.appendChild(summary);
+    }
+
+    summary.innerHTML = `
+      <h2>Products</h2>
+      <ul>${(products.products || []).slice(0, 8).map((product) => `<li>${escapeHtml(product.product_name)} - ${escapeHtml(product.farm_name || "")}</li>`).join("") || "<li>No products</li>"}</ul>
+      <h2>Orders</h2>
+      <ul>${(orders.orders || []).slice(0, 8).map((order) => `<li>#${escapeHtml(order.id)} - ${money(order.total_amount)} - ${escapeHtml(order.status)} <button type='button' onclick='deleteOrder(${order.id})'>Delete</button></li>`).join("") || "<li>No orders</li>"}</ul>
+      <h2>Dealers</h2>
+      <ul>${(dealers.dealers || []).slice(0, 8).map((dealer) => `<li>${escapeHtml(dealer.dealer_name)} - ${escapeHtml(dealer.shop_name)} - ${escapeHtml(dealer.location)}</li>`).join("") || "<li>No dealers</li>"}</ul>
+    `;
+  } catch (error) {
+    ensureMessage(adminPanel, error.message, "error");
+  }
+}
+
+async function deleteUser(userId, userName) {
+  if (!window.confirm(`Delete ${userName || "this user"}?`)) return;
+  try {
+    await apiFetch(`/api/admin/users/${userId}`, { method: "DELETE", auth: true });
+    await loadAdminPanel();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+async function deleteOrder(orderId, orderName) {
+  if (!window.confirm(`Delete order ${orderName || orderId}?`)) return;
+  try {
+    await apiFetch(`/api/admin/orders/${orderId}`, { method: "DELETE", auth: true });
+    await loadAdminPanel();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+function ensureManageFarmInputs() {
+  const form = document.querySelector(".dashboard");
+  if (!form || document.getElementById("productCategory")) return;
+
+  const productName = document.getElementById("productName");
+  const category = document.createElement("input");
+  category.type = "text";
+  category.id = "productCategory";
+  category.placeholder = "Category";
+  const stock = document.createElement("input");
+  stock.type = "number";
+  stock.id = "productStock";
+  stock.placeholder = "Stock";
+
+  if (productName && productName.parentNode) {
+    productName.insertAdjacentElement("afterend", category);
+    category.insertAdjacentElement("afterend", stock);
+  } else {
+    form.append(category, stock);
+  }
+}
+
+async function ensureDealerPanel() {
+  const page = document.querySelector(".products-page");
+  const grid = document.querySelector(".products-page .products-grid");
+  if (!page || !grid || document.getElementById("dealer-panel")) return;
+
+  const user = getUser();
+  if (!user || (user.role !== "Dealer" && user.role !== "Admin")) return;
+
+  const panel = document.createElement("section");
+  panel.id = "dealer-panel";
+  panel.className = "dashboard";
+  panel.innerHTML = `
+    <h2>Dealer Profile</h2>
+    <form id="dealer-profile-form">
+      <input type="text" id="dealerName" placeholder="Dealer Name">
+      <input type="text" id="shopName" placeholder="Shop Name">
+      <input type="text" id="dealerLocation" placeholder="Location">
+      <input type="text" id="dealerPhone" placeholder="Phone">
+      <button type="submit">Save Profile</button>
+    </form>
+
+    <h2>Add Pesticide Product</h2>
+    <form id="pesticide-form">
+      <input type="text" id="pesticideName" placeholder="Product Name">
+      <input type="number" id="pesticidePrice" placeholder="Price">
+      <input type="text" id="pesticideDescription" placeholder="Description">
+      <input type="text" id="pesticideImage" placeholder="Image URL">
+      <input type="number" id="pesticideStock" placeholder="Stock">
+      <button type="submit">Add Product</button>
+    </form>
+
+    <h2>Manage Pesticides</h2>
+    <div id="pesticide-list" class="products"></div>
+  `;
+  page.insertBefore(panel, grid);
+
+  const profileForm = document.getElementById("dealer-profile-form");
+  if (profileForm && !profileForm.dataset.bound) {
+    profileForm.dataset.bound = "true";
+    profileForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const data = await apiFetch("/api/dealers/profile", {
+          method: "POST",
+          auth: true,
+          body: {
+            dealer_name: document.getElementById("dealerName")?.value.trim() || "",
+            shop_name: document.getElementById("shopName")?.value.trim() || "",
+            location: document.getElementById("dealerLocation")?.value.trim() || "",
+            phone: document.getElementById("dealerPhone")?.value.trim() || "",
+          },
+        });
+        ensureMessage(profileForm, data.message || "Dealer profile saved", "success");
+      } catch (error) {
+        ensureMessage(profileForm, error.message, "error");
+      }
+    });
+  }
+
+  const pesticideForm = document.getElementById("pesticide-form");
+  if (pesticideForm && !pesticideForm.dataset.bound) {
+    pesticideForm.dataset.bound = "true";
+    pesticideForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const data = await apiFetch("/api/pesticides", {
+          method: "POST",
+          auth: true,
+          body: {
+            product_name: document.getElementById("pesticideName")?.value.trim() || "",
+            price: toNumber(document.getElementById("pesticidePrice")?.value),
+            description: document.getElementById("pesticideDescription")?.value.trim() || "",
+            image: document.getElementById("pesticideImage")?.value.trim() || "",
+            stock: toNumber(document.getElementById("pesticideStock")?.value),
+          },
+        });
+        ensureMessage(pesticideForm, data.message || "Pesticide created", "success");
+        await loadPesticidePageProducts();
+      } catch (error) {
+        ensureMessage(pesticideForm, error.message, "error");
+      }
+    });
+  }
+}
+
+async function loadPesticidePageProducts() {
+  const container = document.getElementById("pesticide-list") || document.querySelector(".products-page .products-grid");
+  if (!container) return;
+  try {
+    const data = await apiFetch("/api/pesticides");
+    const pesticides = Array.isArray(data.pesticides) ? data.pesticides : [];
+    container.innerHTML = "";
+    pesticides.forEach((pesticide) => {
+      const card = document.createElement("div");
+      card.className = "product-card";
+      card.innerHTML = `
+        <img src="${escapeHtml(pesticide.image || "images/farm.jpg")}" alt="${escapeHtml(pesticide.product_name || "Pesticide")}">
+        <h3>${escapeHtml(pesticide.product_name || "Pesticide")}</h3>
+        <p>${escapeHtml(pesticide.description || "")}</p>
+        <p>${money(pesticide.price)}</p>
+        <p>${escapeHtml(pesticide.shop_name || "")}</p>
+        <p>Stock: ${escapeHtml(pesticide.stock ?? 0)}</p>
+      `;
+      const buy = document.createElement("button");
+      buy.type = "button";
+      buy.textContent = "Buy Now";
+      buy.addEventListener("click", () => addToCart(pesticide.id, "Pesticide", 1, pesticide));
+      card.appendChild(buy);
+
+      const user = getUser();
+      if (user && (user.role === "Dealer" || user.role === "Admin")) {
+        const edit = document.createElement("button");
+        edit.type = "button";
+        edit.textContent = "Edit";
+        edit.addEventListener("click", async () => {
+          const product_name = window.prompt("Product name", pesticide.product_name || "");
+          if (product_name === null) return;
+          const price = window.prompt("Price", String(pesticide.price ?? 0));
+          if (price === null) return;
+          const description = window.prompt("Description", pesticide.description || "");
+          if (description === null) return;
+          const image = window.prompt("Image URL", pesticide.image || "");
+          if (image === null) return;
+          const stock = window.prompt("Stock", String(pesticide.stock ?? 0));
+          if (stock === null) return;
+          try {
+            await apiFetch(`/api/pesticides/${pesticide.id}`, {
+              method: "PUT",
+              auth: true,
+              body: {
+                product_name,
+                price: toNumber(price),
+                description,
+                image,
+                stock: toNumber(stock),
+              },
+            });
+            await loadPesticidePageProducts();
+          } catch (error) {
+            notify(error.message);
+          }
+        });
+        const del = document.createElement("button");
+        del.type = "button";
+        del.textContent = "Delete";
+        del.addEventListener("click", async () => {
+          if (!window.confirm(`Delete ${pesticide.product_name || "this product"}?`)) return;
+          try {
+            await apiFetch(`/api/pesticides/${pesticide.id}`, { method: "DELETE", auth: true });
+            await loadPesticidePageProducts();
+          } catch (error) {
+            notify(error.message);
+          }
+        });
+        card.append(edit, del);
+      }
+      container.appendChild(card);
+    });
+  } catch (error) {
+    container.innerHTML = `<p>${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function searchItems() {
+  const input = document.getElementById("searchInput");
+  const query = input ? input.value.toLowerCase() : "";
+  document.querySelectorAll(".farm-card").forEach((card) => {
+    const searchable = card.dataset.search || card.innerText.toLowerCase();
+    card.style.display = searchable.includes(query) ? "block" : "none";
+  });
+}
+
+function filterCategory(category) {
+  document.querySelectorAll(".farm-card").forEach((card) => {
+    if (category === "all" || card.getAttribute("data-category") === category) {
+      card.style.display = "block";
+    } else {
+      card.style.display = "none";
+    }
+  });
+}
+
+function openFarm(index) {
+  localStorage.setItem("currentFarm", String(index));
+  window.location.href = "manage-farm.html";
+}
+
+async function loadCreateFarmPage() {
+  if (!document.getElementById("farm-list")) return;
+  await displayFarms();
+}
+
+async function loadManageFarmPage() {
+  if (!document.getElementById("product-list")) return;
+  ensureManageFarmInputs();
+  await displayFarmProducts();
+}
+
+async function loadDealerPage() {
+  if (!document.querySelector(".products-page")) return;
+  await ensureDealerPanel();
+  await loadPesticidePageProducts();
+}
+
+async function initPage() {
+  bindAuthForms();
+  bindLogoutLinks();
+  redirectAfterLoginIfNeeded();
+  startCarousel();
+  updateCartCount();
+
+  if (document.querySelector(".top-farms .farms-container")) {
+    await loadHomePage();
+  }
+  if (document.querySelector(".farms-page")) {
+    await loadFarmsPage();
+  }
+  if (getFarmIdFromUrl()) {
+    await loadFarmDetailPage();
+  }
+
+  await loadCreateFarmPage();
+  await loadManageFarmPage();
+
+  if (document.querySelector(".cart-page")) {
+    await loadCart();
+    await loadOrdersSection();
+  }
+  if (document.getElementById("checkout-form")) {
+    const form = document.getElementById("checkout-form");
+    if (form && !form.dataset.bound) {
+      form.dataset.bound = "true";
+      form.addEventListener("submit", handleCheckout);
+    }
+  }
+  if (document.querySelector(".admin-panel")) {
+    await loadAdminPanel();
+  }
+  if (document.querySelector(".products-page")) {
+    await loadDealerPage();
+  }
+}
+
+window.showSlides = showSlides;
+window.currentSlide = currentSlide;
+window.searchItems = searchItems;
+window.filterCategory = filterCategory;
+window.createFarm = createFarm;
+window.displayFarms = displayFarms;
+window.openFarm = openFarm;
+window.addProduct = addProduct;
+window.displayFarmProducts = displayFarmProducts;
+window.addToCart = addToCart;
+window.loadCart = loadCart;
+window.increaseQty = increaseQty;
+window.decreaseQty = decreaseQty;
+window.removeItem = removeItem;
+window.clearCart = clearCart;
+window.loadAdminPanel = loadAdminPanel;
+window.logout = logout;
+window.deleteUser = deleteUser;
+window.deleteOrder = deleteOrder;
+window.updateOrderStatus = updateOrderStatus;
+window.explore = explore;
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", () => {
+    initPage().catch((error) => console.error(error));
+  });
+} else {
+  initPage().catch((error) => console.error(error));
+}
+const API_BASE = (window.SMART_FARM_API_BASE || localStorage.getItem("smartFarmApiBase") || "http://localhost:5000").replace(/\/$/, "");
+const TOKEN_KEY = "token";
+const USER_KEY = "user";
+const GUEST_CART_KEY = "cart";
+
+function explore() {
+  alert("Welcome to Smart Farm Marketplace");
+}
+
+function apiUrl(path) {
+  return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+function readJson(value, fallback = null) {
+  try {
+    return JSON.parse(value) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function formatMoney(value) {
+  const amount = Number(value || 0);
+  return `Rs ${Number.isFinite(amount) ? amount.toFixed(0) : "0"}`;
+}
+
+function toNumber(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function getToken() {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+function getCurrentUser() {
+  return readJson(localStorage.getItem(USER_KEY), null);
+}
+
+function getRole() {
+  return getCurrentUser()?.role || "";
+}
+
+function saveSession(token, user) {
+  localStorage.setItem(TOKEN_KEY, token);
+  localStorage.setItem(USER_KEY, JSON.stringify(user));
+}
+
+function clearSession() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
+}
+
+async function apiFetch(path, { method = "GET", auth = false, body, headers = {} } = {}) {
+  const requestHeaders = { Accept: "application/json", ...headers };
+  let requestBody = body;
+
+  if (body !== undefined && body !== null && typeof body === "object" && !(body instanceof FormData)) {
+    requestHeaders["Content-Type"] = "application/json";
+    requestBody = JSON.stringify(body);
+  }
+
+  if (auth && getToken()) {
+    requestHeaders.Authorization = `Bearer ${getToken()}`;
+  }
+
+  const response = await fetch(apiUrl(path), {
+    method,
+    headers: requestHeaders,
+    body: requestBody,
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  let data = null;
+  if (contentType.includes("application/json")) {
+    data = await response.json();
+  } else {
+    data = await response.text();
+  }
+
+  if (!response.ok) {
+    const message = data && typeof data === "object" && data.message ? data.message : typeof data === "string" ? data : `Request failed (${response.status})`;
+    throw new Error(message);
+  }
+
+  return data;
+}
+
+function notify(message) {
+  alert(message);
+}
+
+function ensureMessage(container, message, tone = "info") {
+  if (!container) return;
+  let box = container.querySelector("[data-message-box]");
+  if (!box) {
+    box = document.createElement("div");
+    box.dataset.messageBox = "true";
+    box.style.margin = "12px 0";
+    box.style.padding = "10px 14px";
+    box.style.borderRadius = "10px";
+    container.prepend(box);
+  }
+  box.textContent = message;
+  box.style.background = tone === "error" ? "#ffe6e6" : tone === "success" ? "#e6ffea" : "#eef4ff";
+  box.style.color = tone === "error" ? "#9b1c1c" : tone === "success" ? "#156b2d" : "#123a73";
+}
+
+function guessCategory(text = "") {
+  const lower = String(text).toLowerCase();
+  if (lower.includes("dairy") || lower.includes("milk") || lower.includes("egg") || lower.includes("chicken")) return "dairy";
+  if (lower.includes("grain") || lower.includes("wheat") || lower.includes("rice") || lower.includes("flour")) return "Grains";
+  if (lower.includes("fruit")) return "fruits";
+  if (lower.includes("sea") || lower.includes("fish")) return "Sea food";
+  if (lower.includes("spice")) return "spices";
+  if (lower.includes("veg") || lower.includes("tomato") || lower.includes("carrot") || lower.includes("spinach")) return "vegetables";
+  return "vegetables";
+}
+
+function getFarmIdFromUrl() {
+  const queryId = new URLSearchParams(window.location.search).get("id");
+  if (queryId) return Number(queryId);
+  const match = window.location.pathname.match(/farm(\d+)\.html$/i);
+  return match ? Number(match[1]) : null;
+}
+
+function updateCartCount(remoteItems = null) {
+  const cartCount = document.getElementById("cart-count");
+  if (!cartCount) return;
+
+  if (Array.isArray(remoteItems)) {
+    cartCount.textContent = String(remoteItems.reduce((sum, item) => sum + toNumber(item.quantity, 0), 0));
+    return;
+  }
+
+  if (getToken()) {
+    apiFetch("/api/cart", { auth: true })
+      .then((data) => {
+        const items = Array.isArray(data.items) ? data.items : [];
+        cartCount.textContent = String(items.reduce((sum, item) => sum + toNumber(item.quantity, 0), 0));
+      })
+      .catch(() => {
+        cartCount.textContent = "0";
+      });
+    return;
+  }
+
+  const cart = readJson(localStorage.getItem(GUEST_CART_KEY), []);
+  cartCount.textContent = String(cart.reduce((sum, item) => sum + toNumber(item.quantity, 0), 0));
+}
+
+function showSlides(index) {
+  const slides = document.querySelectorAll(".slide");
+  const dots = document.querySelectorAll(".dot");
+  if (!slides.length || !dots.length) return;
+
+  slides.forEach((slide) => slide.classList.remove("active"));
+  dots.forEach((dot) => dot.classList.remove("active"));
+
+  let nextIndex = index;
+  if (nextIndex >= slides.length) nextIndex = 0;
+  if (nextIndex < 0) nextIndex = slides.length - 1;
+
+  slides[nextIndex].classList.add("active");
+  dots[nextIndex].classList.add("active");
+  window.__smartFarmSlideIndex = nextIndex;
+}
+
+function currentSlide(index) {
+  showSlides(index);
+}
+
+function startCarousel() {
+  const slides = document.querySelectorAll(".slide");
+  if (!slides.length) return;
+
+  window.__smartFarmSlideIndex = 0;
+  showSlides(0);
+  window.clearInterval(window.__smartFarmSlideTimer);
+  window.__smartFarmSlideTimer = window.setInterval(() => {
+    window.__smartFarmSlideIndex += 1;
+    showSlides(window.__smartFarmSlideIndex);
+  }, 5000);
+}
+
+function farmCardTemplate(farm) {
+  const card = document.createElement("div");
+  card.className = "farm-card";
+  card.dataset.category = guessCategory(`${farm.farm_name || ""} ${farm.description || ""}`);
+  card.dataset.search = `${farm.farm_name || ""} ${farm.location || ""} ${farm.description || ""}`.toLowerCase();
+  card.innerHTML = `
+    <img src="${escapeHtml(farm.image || "images/farm.jpg")}" alt="${escapeHtml(farm.farm_name || "Farm")}">
+    <h3>${escapeHtml(farm.farm_name || "Farm")}</h3>
+    <p>${escapeHtml(farm.location || "")}</p>
+    <a href="farm1.html?id=${farm.id}"><button type="button">View Products</button></a>
+  `;
+  return card;
+}
+
+function productCardTemplate(product) {
+  const card = document.createElement("div");
+  card.className = "product";
+  card.innerHTML = `
+    <img src="${escapeHtml(product.image || "images/farm.jpg")}" alt="${escapeHtml(product.product_name || "Product")}">
+    <h3>${escapeHtml(product.product_name || "Product")}</h3>
+    <p>${escapeHtml(product.description || product.category || "")}</p>
+    <p>${formatMoney(product.price)}</p>
+  `;
+  return card;
+}
+
+function renderCartItem(item, itemRef, remote = false) {
+  const li = document.createElement("li");
+  li.innerHTML = `
+    <div>
+      <strong>${escapeHtml(item.product_name || item.product || "Item")}</strong>
+      <div>${formatMoney(item.price)} x ${toNumber(item.quantity, 1)}</div>
+    </div>
+    <div class="cart-actions"></div>
+  `;
+
+  const actions = li.querySelector(".cart-actions");
+  const plus = document.createElement("button");
+  plus.type = "button";
+  plus.textContent = "+";
+  plus.addEventListener("click", () => increaseQty(itemRef, item.quantity, item.stock, remote));
+
+  const minus = document.createElement("button");
+  minus.type = "button";
+  minus.textContent = "-";
+  minus.addEventListener("click", () => decreaseQty(itemRef, item.quantity, remote));
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.textContent = "Remove";
+  remove.addEventListener("click", () => removeItem(itemRef, remote));
+
+  actions.append(plus, minus, remove);
+  return li;
+}
+
+function bindAuthForms() {
+  const loginForm = document.querySelector(".login-page form");
+  if (loginForm && !loginForm.dataset.bound) {
+    loginForm.dataset.bound = "true";
+    loginForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const data = await apiFetch("/api/auth/login", {
+          method: "POST",
+          body: {
+            email: loginForm.querySelector('input[type="email"]')?.value.trim() || "",
+            password: loginForm.querySelector('input[type="password"]')?.value || "",
+          },
+        });
+        saveSession(data.token, data.user);
+        if (data.user?.role === "Admin") window.location.href = "admin.html";
+        else if (data.user?.role === "Farmer") window.location.href = "create-farm.html";
+        else if (data.user?.role === "Dealer") window.location.href = "pesticides.html";
+        else window.location.href = "index.html";
+      } catch (error) {
+        ensureMessage(loginForm, error.message, "error");
+      }
+    });
+  }
+
+  const registerForm = document.querySelector(".register-page form");
+  if (registerForm && !registerForm.dataset.bound) {
+    registerForm.dataset.bound = "true";
+    registerForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const fields = registerForm.querySelectorAll("input");
+      try {
+        await apiFetch("/api/auth/register", {
+          method: "POST",
+          body: {
+            name: fields[0]?.value.trim() || "",
+            email: fields[1]?.value.trim() || "",
+            password: fields[2]?.value || "",
+            role: registerForm.querySelector("#role")?.value || "buyer",
+          },
+        });
+        ensureMessage(registerForm, "Account created. Please log in.", "success");
+        window.location.href = "login.html";
+      } catch (error) {
+        ensureMessage(registerForm, error.message, "error");
+      }
+    });
+  }
+}
+
+async function logout() {
+  try {
+    if (getToken()) {
+      await apiFetch("/api/auth/logout", { method: "POST", auth: true });
+    }
+  } catch {
+    // ignore logout failures and still clear local session
+  }
+  clearSession();
+  window.location.href = "index.html";
+}
+
+function bindLogoutLinks() {
+  document.querySelectorAll('[onclick="logout()"]').forEach((node) => {
+    if (node.dataset.boundLogout) return;
+    node.dataset.boundLogout = "true";
+    node.addEventListener("click", (event) => {
+      event.preventDefault();
+      logout();
+    });
+  });
+}
+
+function redirectAfterLoginIfNeeded() {
+  if (typeof window.foundUser !== "undefined") return;
+  const user = getCurrentUser();
+  if (!user) return;
+
+  const path = window.location.pathname.split("/").pop();
+  if (path === "login.html" || path === "register.html") {
+    if (user.role === "Admin") window.location.href = "admin.html";
+    else if (user.role === "Farmer") window.location.href = "create-farm.html";
+    else if (user.role === "Dealer") window.location.href = "pesticides.html";
+    else window.location.href = "index.html";
+  }
+}
+
+async function loadHomePage() {
+  const container = document.querySelector(".top-farms .farms-container");
+  if (!container) return;
+  try {
+    const data = await apiFetch("/api/farms");
+    const farms = Array.isArray(data.farms) ? data.farms.slice(0, 3) : [];
+    if (!farms.length) return;
+    container.innerHTML = "";
+    farms.forEach((farm) => container.appendChild(farmCardTemplate(farm)));
+  } catch {
+    // keep static fallback
+  }
+}
+
+async function loadFarmsPage() {
+  const page = document.querySelector(".farms-page");
+  const grid = document.querySelector(".farms-page .farms-grid");
+  if (!page || !grid) return;
+  try {
+    const data = await apiFetch("/api/farms");
+    grid.innerHTML = "";
+    (data.farms || []).forEach((farm) => grid.appendChild(farmCardTemplate(farm)));
+    searchItems();
+  } catch (error) {
+    ensureMessage(page, error.message, "error");
+  }
+}
+
+async function loadFarmDetailPage() {
+  const farmId = getFarmIdFromUrl();
+  const profile = document.querySelector(".farm-profile");
+  const productsSection = document.querySelector(".products");
+  if (!farmId || !profile || !productsSection) return;
+
+  try {
+    const data = await apiFetch(`/api/farms/${farmId}`);
+    const farm = data.farm;
+    if (!farm) return;
+
+    document.title = farm.farm_name || document.title;
+    profile.innerHTML = `
+      <img src="${escapeHtml(farm.image || "images/farm.jpg")}" alt="${escapeHtml(farm.farm_name || "Farm")}">
+      <div class="farm-info">
+        <h1>${escapeHtml(farm.farm_name || "Farm")}</h1>
+        <p><strong>Farmer:</strong> ${escapeHtml(farm.farmer_name || "")}</p>
+        <p><strong>Location:</strong> ${escapeHtml(farm.location || "")}</p>
+        <p>${escapeHtml(farm.description || "")}</p>
+      </div>
+    `;
+
+    productsSection.innerHTML = "<h2>Products from this Farm</h2>";
+    const container = document.createElement("div");
+    container.className = "product-container";
+    (data.products || []).forEach((product) => {
+      const card = productCardTemplate(product);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "Add to Cart";
+      button.addEventListener("click", () => addToCart(product.id, "Farm", 1, product));
+      card.appendChild(button);
+      container.appendChild(card);
+    });
+    productsSection.appendChild(container);
+  } catch (error) {
+    ensureMessage(profile, error.message, "error");
+  }
+}
+
+async function createFarm() {
+  const farmName = document.getElementById("farmName")?.value.trim() || "";
+  const farmDescription = document.getElementById("farmDescription")?.value.trim() || "";
+  const farmLocation = document.getElementById("farmLocation")?.value.trim() || "";
+  const farmImage = document.getElementById("farmImage")?.value.trim() || "";
+  try {
+    const data = await apiFetch("/api/farms", {
+      method: "POST",
+      auth: true,
+      body: {
+        farm_name: farmName,
+        location: farmLocation,
+        description: farmDescription,
+        image: farmImage,
+      },
+    });
+    notify(data.message || "Farm created successfully");
+    await displayFarms();
+  } catch (error) {
+    ensureMessage(document.querySelector(".dashboard"), error.message, "error");
+  }
+}
+
+async function displayFarms() {
+  const container = document.getElementById("farm-list");
+  if (!container) return;
+  try {
+    const data = await apiFetch("/api/farms", { auth: true });
+    const user = getCurrentUser();
+    const farms = Array.isArray(data.farms) ? data.farms : [];
+    const visible = user ? farms.filter((farm) => Number(farm.farmer_id) === Number(user.id) || user.role === "Admin") : farms;
+    container.innerHTML = "";
+    if (!visible.length) {
+      container.innerHTML = "<p>No farms found yet.</p>";
+      return;
+    }
+    visible.forEach((farm) => {
+      const card = document.createElement("div");
+      card.className = "product";
+      card.innerHTML = `
+        <img src="${escapeHtml(farm.image || "images/farm.jpg")}" alt="${escapeHtml(farm.farm_name || "Farm")}">
+        <h3>${escapeHtml(farm.farm_name || "Farm")}</h3>
+        <p>${escapeHtml(farm.location || "")}</p>
+        <p>${escapeHtml(farm.description || "")}</p>
+      `;
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.textContent = "Edit Farm";
+      edit.addEventListener("click", async () => {
+        const farm_name = window.prompt("Farm name", farm.farm_name || "");
+        if (farm_name === null) return;
+        const location = window.prompt("Location", farm.location || "");
+        if (location === null) return;
+        const description = window.prompt("Description", farm.description || "");
+        if (description === null) return;
+        const image = window.prompt("Image URL", farm.image || "");
+        if (image === null) return;
+        try {
+          await apiFetch(`/api/farms/${farm.id}`, {
+            method: "PUT",
+            auth: true,
+            body: { farm_name, location, description, image },
+          });
+          await displayFarms();
+        } catch (error) {
+          alert(error.message);
+        }
+      });
+      const del = document.createElement("button");
+      del.type = "button";
+      del.textContent = "Delete Farm";
+      del.addEventListener("click", async () => {
+        if (!window.confirm(`Delete ${farm.farm_name || "this farm"}?`)) return;
+        try {
+          await apiFetch(`/api/farms/${farm.id}`, { method: "DELETE", auth: true });
+          await displayFarms();
+        } catch (error) {
+          alert(error.message);
+        }
+      });
+      card.append(edit, del);
+      container.appendChild(card);
+    });
+  } catch (error) {
+    container.innerHTML = `<p>${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function ensureManageFarmInputs() {
+  const form = document.querySelector(".dashboard");
+  if (!form || document.getElementById("productCategory")) return;
+  const productName = document.getElementById("productName");
+  const category = document.createElement("input");
+  category.type = "text";
+  category.id = "productCategory";
+  category.placeholder = "Category";
+  const stock = document.createElement("input");
+  stock.type = "number";
+  stock.id = "productStock";
+  stock.placeholder = "Stock";
+  if (productName && productName.parentNode) {
+    productName.insertAdjacentElement("afterend", category);
+    category.insertAdjacentElement("afterend", stock);
+  } else {
+    form.append(category, stock);
+  }
+}
+
+async function addProduct() {
+  const productName = document.getElementById("productName")?.value.trim() || "";
+  const productPrice = document.getElementById("productPrice")?.value || "";
+  const productCategory = document.getElementById("productCategory")?.value.trim() || "General";
+  const productStock = document.getElementById("productStock")?.value || "0";
+  const productImage = document.getElementById("productImage")?.value.trim() || "";
+  try {
+    const data = await apiFetch("/api/products", {
+      method: "POST",
+      auth: true,
+      body: {
+        product_name: productName,
+        price: toNumber(productPrice),
+        category: productCategory,
+        image: productImage,
+        stock: toNumber(productStock),
+      },
+    });
+    notify(data.message || "Product created successfully");
+    await displayFarmProducts();
+  } catch (error) {
+    ensureMessage(document.querySelector(".dashboard"), error.message, "error");
+  }
+}
+
+async function displayFarmProducts() {
+  const container = document.getElementById("product-list");
+  if (!container) return;
+  try {
+    const data = await apiFetch("/api/farmer/products", { auth: true });
+    const products = Array.isArray(data.products) ? data.products : [];
+    container.innerHTML = "";
+    if (!products.length) {
+      container.innerHTML = "<p>No products found yet.</p>";
+      return;
+    }
+    products.forEach((product) => {
+      const card = document.createElement("div");
+      card.className = "product";
+      card.innerHTML = `
+        <img src="${escapeHtml(product.image || "images/farm.jpg")}" alt="${escapeHtml(product.product_name || "Product")}">
+        <h3>${escapeHtml(product.product_name || "Product")}</h3>
+        <p>${formatMoney(product.price)}</p>
+        <p>Category: ${escapeHtml(product.category || "General")}</p>
+        <p>Stock: ${escapeHtml(product.stock ?? 0)}</p>
+      `;
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.textContent = "Edit Product";
+      edit.addEventListener("click", async () => {
+        const product_name = window.prompt("Product name", product.product_name || "");
+        if (product_name === null) return;
+        const price = window.prompt("Price", String(product.price ?? 0));
+        if (price === null) return;
+        const category = window.prompt("Category", product.category || "General");
+        if (category === null) return;
+        const image = window.prompt("Image URL", product.image || "");
+        if (image === null) return;
+        const stock = window.prompt("Stock", String(product.stock ?? 0));
+        if (stock === null) return;
+        try {
+          await apiFetch(`/api/products/${product.id}`, {
+            method: "PUT",
+            auth: true,
+            body: {
+              product_name,
+              price: toNumber(price),
+              category,
+              image,
+              stock: toNumber(stock),
+            },
+          });
+          await displayFarmProducts();
+        } catch (error) {
+          alert(error.message);
+        }
+      });
+      const del = document.createElement("button");
+      del.type = "button";
+      del.textContent = "Delete Product";
+      del.addEventListener("click", async () => {
+        if (!window.confirm(`Delete ${product.product_name || "this product"}?`)) return;
+        try {
+          await apiFetch(`/api/products/${product.id}`, { method: "DELETE", auth: true });
+          await displayFarmProducts();
+        } catch (error) {
+          alert(error.message);
+        }
+      });
+      card.append(edit, del);
+      container.appendChild(card);
+    });
+  } catch (error) {
+    container.innerHTML = `<p>${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function getLocalCart() {
+  return readJson(localStorage.getItem(GUEST_CART_KEY), []);
+}
+
+function setLocalCart(items) {
+  localStorage.setItem(GUEST_CART_KEY, JSON.stringify(items));
+}
+
+async function addToCart(productOrId, secondArg, quantity = 1, productMeta = null) {
+  const productType = secondArg === "Farm" || secondArg === "Pesticide" ? secondArg : null;
+
+  if (getToken() && productType) {
+    try {
+      const data = await apiFetch("/api/cart", {
+        method: "POST",
+        auth: true,
+        body: {
+          product_id: productOrId,
+          product_type: productType,
+          quantity,
+        },
+      });
+      updateCartCount();
+      notify(data.message || `${productMeta?.product_name || "Item"} added to cart`);
+      return;
+    } catch (error) {
+      notify(error.message);
+      return;
+    }
+  }
+
+  const cart = getLocalCart();
+  const productName = productMeta?.product_name || String(productOrId || "Item");
+  const price = productType ? toNumber(productMeta?.price) : toNumber(secondArg);
+  const existing = cart.find((item) => item.product === productName);
+  if (existing) existing.quantity += quantity;
+  else cart.push({ product: productName, price, quantity });
+  setLocalCart(cart);
+  updateCartCount();
+  notify(`${productName} added to cart`);
+}
+
+function renderCartItem(item, itemRef, remote = false) {
+  const li = document.createElement("li");
+  li.innerHTML = `
+    <div>
+      <strong>${escapeHtml(item.product_name || item.product || "Item")}</strong>
+      <div>${formatMoney(item.price)} x ${toNumber(item.quantity, 1)}</div>
+    </div>
+    <div class="cart-actions"></div>
+  `;
+
+  const actions = li.querySelector(".cart-actions");
+  const plus = document.createElement("button");
+  plus.type = "button";
+  plus.textContent = "+";
+  plus.addEventListener("click", () => increaseQty(itemRef, item.quantity, item.stock, remote));
+  const minus = document.createElement("button");
+  minus.type = "button";
+  minus.textContent = "-";
+  minus.addEventListener("click", () => decreaseQty(itemRef, item.quantity, remote));
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.textContent = "Remove";
+  remove.addEventListener("click", () => removeItem(itemRef, remote));
+  actions.append(plus, minus, remove);
+  return li;
+}
+
+async function loadCartFromApi() {
+  const list = document.getElementById("cart-items");
+  if (!list) return false;
+  try {
+    const data = await apiFetch("/api/cart", { auth: true });
+    const items = Array.isArray(data.items) ? data.items : [];
+    list.innerHTML = "";
+    if (!items.length) {
+      list.innerHTML = "<li>Your cart is empty.</li>";
+    } else {
+      items.forEach((item) => list.appendChild(renderCartItem(item, item.id, true)));
+    }
+    const totalPrice = document.getElementById("total-price");
+    if (totalPrice) totalPrice.textContent = `Total: ${formatMoney(data.total_amount || 0)}`;
+    updateCartCount(items);
+    return true;
+  } catch (error) {
+    ensureMessage(list.parentElement || list, error.message, "error");
+    return false;
+  }
+}
+
+function loadCartFromLocal() {
+  const list = document.getElementById("cart-items");
+  if (!list) return;
+  const cart = getLocalCart();
+  list.innerHTML = "";
+  let total = 0;
+  if (!cart.length) {
+    list.innerHTML = "<li>Your cart is empty.</li>";
+  } else {
+    cart.forEach((item, index) => {
+      total += toNumber(item.price) * toNumber(item.quantity, 1);
+      list.appendChild(renderCartItem({ product: item.product, price: item.price, quantity: item.quantity }, index, false));
+    });
+  }
+  const totalPrice = document.getElementById("total-price");
+  if (totalPrice) totalPrice.textContent = `Total: ${formatMoney(total)}`;
+  updateCartCount();
+}
+
+async function loadCart() {
+  if (getToken() && await loadCartFromApi()) return;
+  loadCartFromLocal();
+}
+
+async function increaseQty(itemRef, currentQuantity, stock, remote = false) {
+  if (remote || (typeof itemRef === "number" && getToken())) {
+    const nextQuantity = toNumber(currentQuantity, 1) + 1;
+    if (stock != null && nextQuantity > toNumber(stock)) {
+      notify("Requested quantity exceeds stock");
+      return;
+    }
+    try {
+      await apiFetch(`/api/cart/${itemRef}`, { method: "PUT", auth: true, body: { quantity: nextQuantity } });
+      await loadCart();
+    } catch (error) {
+      notify(error.message);
+    }
+    return;
+  }
+
+  const cart = getLocalCart();
+  if (!cart[itemRef]) return;
+  cart[itemRef].quantity += 1;
+  setLocalCart(cart);
+  loadCartFromLocal();
+}
+
+async function decreaseQty(itemRef, currentQuantity, remote = false) {
+  if (remote || (typeof itemRef === "number" && getToken())) {
+    const nextQuantity = toNumber(currentQuantity, 1) - 1;
+    if (nextQuantity < 1) {
+      await removeItem(itemRef, true);
+      return;
+    }
+    try {
+      await apiFetch(`/api/cart/${itemRef}`, { method: "PUT", auth: true, body: { quantity: nextQuantity } });
+      await loadCart();
+    } catch (error) {
+      notify(error.message);
+    }
+    return;
+  }
+
+  const cart = getLocalCart();
+  if (!cart[itemRef]) return;
+  if (cart[itemRef].quantity > 1) cart[itemRef].quantity -= 1;
+  else cart.splice(itemRef, 1);
+  setLocalCart(cart);
+  loadCartFromLocal();
+}
+
+async function removeItem(itemRef, remote = false) {
+  if (remote || (typeof itemRef === "number" && getToken())) {
+    try {
+      await apiFetch(`/api/cart/${itemRef}`, { method: "DELETE", auth: true });
+      await loadCart();
+    } catch (error) {
+      notify(error.message);
+    }
+    return;
+  }
+
+  const cart = getLocalCart();
+  cart.splice(itemRef, 1);
+  setLocalCart(cart);
+  loadCartFromLocal();
+}
+
+async function clearCart() {
+  if (getToken()) {
+    try {
+      const data = await apiFetch("/api/cart", { auth: true });
+      const items = Array.isArray(data.items) ? data.items : [];
+      await Promise.all(items.map((item) => apiFetch(`/api/cart/${item.id}`, { method: "DELETE", auth: true })));
+    } catch {
+      // ignore and fall back to local clear
+    }
+  }
+  localStorage.removeItem(GUEST_CART_KEY);
+  await loadCart();
+}
+
+async function handleCheckout(event) {
+  event.preventDefault();
+  if (!getToken()) {
+    notify("Please log in before placing an order.");
+    window.location.href = "login.html";
+    return;
+  }
+  try {
+    const data = await apiFetch("/api/orders", { method: "POST", auth: true });
+    ensureMessage(document.getElementById("checkout-form"), data.message || "Order placed successfully", "success");
+    await clearCart();
+    await loadOrdersSection();
+  } catch (error) {
+    ensureMessage(document.getElementById("checkout-form"), error.message, "error");
+  }
+}
+
+function renderOrders(parent, orders) {
+  if (!parent) return;
+  parent.innerHTML = "";
+  if (!orders.length) {
+    parent.innerHTML = "<li>No orders found.</li>";
+    return;
+  }
+
+  orders.forEach((order) => {
+    const card = document.createElement("div");
+    card.className = "product";
+    const items = Array.isArray(order.items) && order.items.length
+      ? `<ul>${order.items.map((item) => `<li>${escapeHtml(item.product_name)} x ${escapeHtml(item.quantity)} (${formatMoney(item.price)})</li>`).join("")}</ul>`
+      : "";
+    card.innerHTML = `
+      <h3>Order #${escapeHtml(order.id)}</h3>
+      <p><strong>Status:</strong> ${escapeHtml(order.status)}</p>
+      <p><strong>Total:</strong> ${formatMoney(order.total_amount)}</p>
+      <p><strong>Created:</strong> ${escapeHtml(order.created_at || "")}</p>
+      ${order.buyer_name ? `<p><strong>Buyer:</strong> ${escapeHtml(order.buyer_name)}</p>` : ""}
+      ${items}
+    `;
+    if (getRole() === "Farmer" || getRole() === "Admin") {
+      const select = document.createElement("select");
+      select.id = `order-status-${order.id}`;
+      ["Pending", "Shipped", "Delivered"].forEach((status) => {
+        const option = document.createElement("option");
+        option.value = status;
+        option.textContent = status;
+        if (status === order.status) option.selected = true;
+        select.appendChild(option);
+      });
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "Update Status";
+      button.addEventListener("click", () => updateOrderStatus(order.id));
+      card.append(select, button);
+    }
+    parent.appendChild(card);
+  });
+}
+
+async function loadOrdersSection() {
+  const cartPage = document.querySelector(".cart-page");
+  if (!cartPage || !getToken()) return;
+  let section = document.getElementById("orders-section");
+  if (!section) {
+    section = document.createElement("section");
+    section.id = "orders-section";
+    section.innerHTML = "<h2>My Orders</h2><ul id='orders-list'></ul>";
+    cartPage.appendChild(section);
+  }
+  try {
+    const data = await apiFetch("/api/orders", { auth: true });
+    renderOrders(document.getElementById("orders-list"), data.orders || []);
+  } catch (error) {
+    ensureMessage(section, error.message, "error");
+  }
+}
+
+async function loadOrders() {
+  await loadOrdersSection();
+}
+
+async function updateOrderStatus(orderId) {
+  const select = document.getElementById(`order-status-${orderId}`);
+  if (!select) return;
+  try {
+    await apiFetch(`/api/orders/${orderId}`, { method: "PUT", auth: true, body: { status: select.value } });
+    await loadAdminPanel();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+async function loadAdminPanel() {
+  const adminPanel = document.querySelector(".admin-panel");
+  if (!adminPanel) return;
+  if (!getToken() || getRole() !== "Admin") {
+    ensureMessage(adminPanel, "Admin access required.", "error");
+    return;
+  }
+
+  try {
+    const [stats, users, farms, products, orders, dealers] = await Promise.all([
+      apiFetch("/api/admin/stats", { auth: true }),
+      apiFetch("/api/admin/users", { auth: true }),
+      apiFetch("/api/admin/farms", { auth: true }),
+      apiFetch("/api/admin/products", { auth: true }),
+      apiFetch("/api/admin/orders", { auth: true }),
+      apiFetch("/api/admin/dealers", { auth: true }),
+    ]);
+
+    const totalUsers = document.getElementById("totalUsers");
+    const totalFarms = document.getElementById("totalFarms");
+    if (totalUsers) totalUsers.textContent = stats.total_users ?? 0;
+    if (totalFarms) totalFarms.textContent = stats.total_farms ?? 0;
+
+    const usersList = document.getElementById("usersList");
+    if (usersList) {
+      usersList.innerHTML = "";
+      (users.users || []).forEach((user) => {
+        const li = document.createElement("li");
+        li.innerHTML = `<span>${escapeHtml(user.name)} - ${escapeHtml(user.role)}</span>`;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "Delete";
+        button.addEventListener("click", async () => {
+          if (!window.confirm(`Delete ${user.name}?`)) return;
+          try {
+            await apiFetch(`/api/admin/users/${user.id}`, { method: "DELETE", auth: true });
+            await loadAdminPanel();
+          } catch (error) {
+            notify(error.message);
+          }
+        });
+        li.appendChild(button);
+        usersList.appendChild(li);
+      });
+    }
+
+    const farmsList = document.getElementById("farmsList");
+    if (farmsList) {
+      farmsList.innerHTML = "";
+      (farms.farms || []).forEach((farm) => {
+        const li = document.createElement("li");
+        li.textContent = `${farm.farm_name} - ${farm.location}`;
+        farmsList.appendChild(li);
+      });
+    }
+
+    let summary = document.getElementById("admin-summary");
+    if (!summary) {
+      summary = document.createElement("section");
+      summary.id = "admin-summary";
+      adminPanel.appendChild(summary);
+    }
+
+    summary.innerHTML = `
+      <h2>Products</h2>
+      <ul>${(products.products || []).slice(0, 8).map((product) => `<li>${escapeHtml(product.product_name)} - ${escapeHtml(product.farm_name || "")}</li>`).join("") || "<li>No products</li>"}</ul>
+      <h2>Orders</h2>
+      <ul>${(orders.orders || []).slice(0, 8).map((order) => `<li>#${escapeHtml(order.id)} - ${formatMoney(order.total_amount)} - ${escapeHtml(order.status)} <button type='button' onclick='deleteOrder(${order.id})'>Delete</button></li>`).join("") || "<li>No orders</li>"}</ul>
+      <h2>Dealers</h2>
+      <ul>${(dealers.dealers || []).slice(0, 8).map((dealer) => `<li>${escapeHtml(dealer.dealer_name)} - ${escapeHtml(dealer.shop_name)} - ${escapeHtml(dealer.location)}</li>`).join("") || "<li>No dealers</li>"}</ul>
+    `;
+  } catch (error) {
+    ensureMessage(adminPanel, error.message, "error");
+  }
+}
+
+async function deleteUser(userId, userName) {
+  if (!window.confirm(`Delete ${userName || "this user"}?`)) return;
+  try {
+    await apiFetch(`/api/admin/users/${userId}`, { method: "DELETE", auth: true });
+    await loadAdminPanel();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+async function deleteOrder(orderId) {
+  if (!window.confirm("Delete this order?")) return;
+  try {
+    await apiFetch(`/api/admin/orders/${orderId}`, { method: "DELETE", auth: true });
+    await loadAdminPanel();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+function ensureManageFarmInputs() {
+  const form = document.querySelector(".dashboard");
+  if (!form || document.getElementById("productCategory")) return;
+  const productName = document.getElementById("productName");
+  const category = document.createElement("input");
+  category.type = "text";
+  category.id = "productCategory";
+  category.placeholder = "Category";
+  const stock = document.createElement("input");
+  stock.type = "number";
+  stock.id = "productStock";
+  stock.placeholder = "Stock";
+  if (productName && productName.parentNode) {
+    productName.insertAdjacentElement("afterend", category);
+    category.insertAdjacentElement("afterend", stock);
+  } else {
+    form.append(category, stock);
+  }
+}
+
+function ensureDealerPanel() {
+  const page = document.querySelector(".products-page");
+  const grid = document.querySelector(".products-page .products-grid");
+  if (!page || !grid || document.getElementById("dealer-panel")) return;
+
+  const panel = document.createElement("section");
+  panel.id = "dealer-panel";
+  panel.className = "dashboard";
+  panel.innerHTML = `
+    <h2>Dealer Profile</h2>
+    <form id="dealer-profile-form">
+      <input type="text" id="dealerName" placeholder="Dealer Name">
+      <input type="text" id="shopName" placeholder="Shop Name">
+      <input type="text" id="dealerLocation" placeholder="Location">
+      <input type="text" id="dealerPhone" placeholder="Phone">
+      <button type="submit">Save Profile</button>
+    </form>
+
+    <h2>Add Pesticide Product</h2>
+    <form id="pesticide-form">
+      <input type="text" id="pesticideName" placeholder="Product Name">
+      <input type="number" id="pesticidePrice" placeholder="Price">
+      <input type="text" id="pesticideDescription" placeholder="Description">
+      <input type="text" id="pesticideImage" placeholder="Image URL">
+      <input type="number" id="pesticideStock" placeholder="Stock">
+      <button type="submit">Add Product</button>
+    </form>
+
+    <h2>Manage Pesticides</h2>
+    <div id="pesticide-list" class="products"></div>
+  `;
+  page.insertBefore(panel, grid);
+}
+
+function bindDealerForms() {
+  const profileForm = document.getElementById("dealer-profile-form");
+  if (profileForm && !profileForm.dataset.bound) {
+    profileForm.dataset.bound = "true";
+    profileForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const data = await apiFetch("/api/dealers/profile", {
+          method: "POST",
+          auth: true,
+          body: {
+            dealer_name: document.getElementById("dealerName")?.value.trim() || "",
+            shop_name: document.getElementById("shopName")?.value.trim() || "",
+            location: document.getElementById("dealerLocation")?.value.trim() || "",
+            phone: document.getElementById("dealerPhone")?.value.trim() || "",
+          },
+        });
+        ensureMessage(profileForm, data.message || "Dealer profile saved", "success");
+      } catch (error) {
+        ensureMessage(profileForm, error.message, "error");
+      }
+    });
+  }
+
+  const pesticideForm = document.getElementById("pesticide-form");
+  if (pesticideForm && !pesticideForm.dataset.bound) {
+    pesticideForm.dataset.bound = "true";
+    pesticideForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const data = await apiFetch("/api/pesticides", {
+          method: "POST",
+          auth: true,
+          body: {
+            product_name: document.getElementById("pesticideName")?.value.trim() || "",
+            price: toNumber(document.getElementById("pesticidePrice")?.value),
+            description: document.getElementById("pesticideDescription")?.value.trim() || "",
+            image: document.getElementById("pesticideImage")?.value.trim() || "",
+            stock: toNumber(document.getElementById("pesticideStock")?.value),
+          },
+        });
+        ensureMessage(pesticideForm, data.message || "Pesticide created", "success");
+        await displayPesticides();
+      } catch (error) {
+        ensureMessage(pesticideForm, error.message, "error");
+      }
+    });
+  }
+}
+
+async function displayPesticides() {
+  const container = document.getElementById("pesticide-list") || document.querySelector(".products-page .products-grid");
+  if (!container) return;
+  try {
+    const data = await apiFetch("/api/pesticides");
+    const pesticides = Array.isArray(data.pesticides) ? data.pesticides : [];
+    container.innerHTML = "";
+    pesticides.forEach((pesticide) => {
+      const card = document.createElement("div");
+      card.className = "product-card";
+      card.innerHTML = `
+        <img src="${escapeHtml(pesticide.image || "images/farm.jpg")}" alt="${escapeHtml(pesticide.product_name || "Pesticide")}">
+        <h3>${escapeHtml(pesticide.product_name || "Pesticide")}</h3>
+        <p>${escapeHtml(pesticide.description || "")}</p>
+        <p>${formatMoney(pesticide.price)}</p>
+        <p>${escapeHtml(pesticide.shop_name || "")}</p>
+        <p>Stock: ${escapeHtml(pesticide.stock ?? 0)}</p>
+      `;
+      const buy = document.createElement("button");
+      buy.type = "button";
+      buy.textContent = "Buy Now";
+      buy.addEventListener("click", () => addToCart(pesticide.id, "Pesticide", 1, pesticide));
+      card.appendChild(buy);
+
+      const user = getCurrentUser();
+      if (user && (user.role === "Dealer" || user.role === "Admin")) {
+        const edit = document.createElement("button");
+        edit.type = "button";
+        edit.textContent = "Edit";
+        edit.addEventListener("click", async () => {
+          const product_name = window.prompt("Product name", pesticide.product_name || "");
+          if (product_name === null) return;
+          const price = window.prompt("Price", String(pesticide.price ?? 0));
+          if (price === null) return;
+          const description = window.prompt("Description", pesticide.description || "");
+          if (description === null) return;
+          const image = window.prompt("Image URL", pesticide.image || "");
+          if (image === null) return;
+          const stock = window.prompt("Stock", String(pesticide.stock ?? 0));
+          if (stock === null) return;
+          try {
+            await apiFetch(`/api/pesticides/${pesticide.id}`, {
+              method: "PUT",
+              auth: true,
+              body: {
+                product_name,
+                price: toNumber(price),
+                description,
+                image,
+                stock: toNumber(stock),
+              },
+            });
+            await displayPesticides();
+          } catch (error) {
+            notify(error.message);
+          }
+        });
+        const del = document.createElement("button");
+        del.type = "button";
+        del.textContent = "Delete";
+        del.addEventListener("click", async () => {
+          if (!window.confirm(`Delete ${pesticide.product_name || "this product"}?`)) return;
+          try {
+            await apiFetch(`/api/pesticides/${pesticide.id}`, { method: "DELETE", auth: true });
+            await displayPesticides();
+          } catch (error) {
+            notify(error.message);
+          }
+        });
+        card.append(edit, del);
+      }
+
+      container.appendChild(card);
+    });
+  } catch (error) {
+    container.innerHTML = `<p>${escapeHtml(error.message)}</p>`;
+  }
+}
+
+async function loadDealerAndPesticidePage() {
+  if (!document.querySelector(".products-page")) return;
+  ensureDealerPanel();
+  bindDealerForms();
+  await displayPesticides();
+}
+
+async function loadOrdersSection() {
+  const cartPage = document.querySelector(".cart-page");
+  if (!cartPage || !getToken()) return;
+  let section = document.getElementById("orders-section");
+  if (!section) {
+    section = document.createElement("section");
+    section.id = "orders-section";
+    section.innerHTML = "<h2>My Orders</h2><ul id='orders-list'></ul>";
+    cartPage.appendChild(section);
+  }
+  try {
+    const data = await apiFetch("/api/orders", { auth: true });
+    const orders = Array.isArray(data.orders) ? data.orders : [];
+    const list = document.getElementById("orders-list");
+    renderOrders(list, orders);
+  } catch (error) {
+    ensureMessage(section, error.message, "error");
+  }
+}
+
+function renderOrders(parent, orders) {
+  if (!parent) return;
+  parent.innerHTML = "";
+  if (!orders.length) {
+    parent.innerHTML = "<li>No orders found.</li>";
+    return;
+  }
+  orders.forEach((order) => {
+    const card = document.createElement("div");
+    card.className = "product";
+    const items = Array.isArray(order.items) && order.items.length
+      ? `<ul>${order.items.map((item) => `<li>${escapeHtml(item.product_name)} x ${escapeHtml(item.quantity)} (${formatMoney(item.price)})</li>`).join("")}</ul>`
+      : "";
+    card.innerHTML = `
+      <h3>Order #${escapeHtml(order.id)}</h3>
+      <p><strong>Status:</strong> ${escapeHtml(order.status)}</p>
+      <p><strong>Total:</strong> ${formatMoney(order.total_amount)}</p>
+      <p><strong>Created:</strong> ${escapeHtml(order.created_at || "")}</p>
+      ${order.buyer_name ? `<p><strong>Buyer:</strong> ${escapeHtml(order.buyer_name)}</p>` : ""}
+      ${items}
+    `;
+    if (getRole() === "Farmer" || getRole() === "Admin") {
+      const select = document.createElement("select");
+      select.id = `order-status-${order.id}`;
+      ["Pending", "Shipped", "Delivered"].forEach((status) => {
+        const option = document.createElement("option");
+        option.value = status;
+        option.textContent = status;
+        if (status === order.status) option.selected = true;
+        select.appendChild(option);
+      });
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "Update Status";
+      button.addEventListener("click", () => updateOrderStatus(order.id));
+      card.append(select, button);
+    }
+    parent.appendChild(card);
+  });
+}
+
+async function updateOrderStatus(orderId) {
+  const select = document.getElementById(`order-status-${orderId}`);
+  if (!select) return;
+  try {
+    await apiFetch(`/api/orders/${orderId}`, { method: "PUT", auth: true, body: { status: select.value } });
+    await loadAdminPanel();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+function searchItems() {
+  const input = document.getElementById("searchInput");
+  const query = input ? input.value.toLowerCase() : "";
+  document.querySelectorAll(".farm-card").forEach((card) => {
+    const searchable = card.dataset.search || card.innerText.toLowerCase();
+    card.style.display = searchable.includes(query) ? "block" : "none";
+  });
+}
+
+function filterCategory(category) {
+  document.querySelectorAll(".farm-card").forEach((card) => {
+    if (category === "all" || card.getAttribute("data-category") === category) {
+      card.style.display = "block";
+    } else {
+      card.style.display = "none";
+    }
+  });
+}
+
+function openFarm(index) {
+  localStorage.setItem("currentFarm", String(index));
+  window.location.href = "manage-farm.html";
+}
+
+async function initPage() {
+  bindAuthForms();
+  bindLogoutLinks();
+  startCarousel();
+  redirectAfterLoginIfNeeded();
+  updateCartCount();
+
+  if (document.querySelector(".top-farms .farms-container")) {
+    await loadHomePage();
+  }
+
+  if (document.querySelector(".farms-page")) {
+    await loadFarmsPage();
+  }
+
+  if (getFarmIdFromUrl()) {
+    await loadFarmDetailPage();
+  }
+
+  if (document.getElementById("farm-list")) {
+    await displayFarms();
+  }
+
+  if (document.getElementById("product-list")) {
+    ensureManageFarmInputs();
+    await displayFarmProducts();
+  }
+
+  if (document.querySelector(".cart-page")) {
+    await loadCart();
+    await loadOrdersSection();
+  }
+
+  const checkoutForm = document.getElementById("checkout-form");
+  if (checkoutForm && !checkoutForm.dataset.bound) {
+    checkoutForm.dataset.bound = "true";
+    checkoutForm.addEventListener("submit", handleCheckout);
+  }
+
+  if (document.querySelector(".admin-panel")) {
+    await loadAdminPanel();
+  }
+
+  if (document.querySelector(".products-page")) {
+    await loadDealerAndPesticidePage();
+  }
+}
+
+window.explore = explore;
+window.showSlides = showSlides;
+window.currentSlide = currentSlide;
+window.searchItems = searchItems;
+window.filterCategory = filterCategory;
+window.addToCart = addToCart;
+window.loadCart = loadCart;
+window.increaseQty = increaseQty;
+window.decreaseQty = decreaseQty;
+window.removeItem = removeItem;
+window.clearCart = clearCart;
+window.createFarm = createFarm;
+window.displayFarms = displayFarms;
+window.openFarm = openFarm;
+window.addProduct = addProduct;
+window.displayFarmProducts = displayFarmProducts;
+window.loadAdminPanel = loadAdminPanel;
+window.logout = logout;
+window.deleteUser = deleteUser;
+window.deleteOrder = deleteOrder;
+window.updateOrderStatus = updateOrderStatus;
+window.editFarm = async function editFarmPrompt(farm) {
+  const farm_name = window.prompt("Farm name", farm.farm_name || "");
+  if (farm_name === null) return;
+  const location = window.prompt("Location", farm.location || "");
+  if (location === null) return;
+  const description = window.prompt("Description", farm.description || "");
+  if (description === null) return;
+  const image = window.prompt("Image URL", farm.image || "");
+  if (image === null) return;
+  try {
+    await apiFetch(`/api/farms/${farm.id}`, { method: "PUT", auth: true, body: { farm_name, location, description, image } });
+    await displayFarms();
+  } catch (error) {
+    notify(error.message);
+  }
+};
+window.deleteFarm = deleteFarm;
+window.editProduct = async function editProductPrompt(product) {
+  const product_name = window.prompt("Product name", product.product_name || "");
+  if (product_name === null) return;
+  const price = window.prompt("Price", String(product.price ?? 0));
+  if (price === null) return;
+  const category = window.prompt("Category", product.category || "General");
+  if (category === null) return;
+  const image = window.prompt("Image URL", product.image || "");
+  if (image === null) return;
+  const stock = window.prompt("Stock", String(product.stock ?? 0));
+  if (stock === null) return;
+  try {
+    await apiFetch(`/api/products/${product.id}`, { method: "PUT", auth: true, body: { product_name, price: toNumber(price), category, image, stock: toNumber(stock) } });
+    await displayFarmProducts();
+  } catch (error) {
+    notify(error.message);
+  }
+};
+window.deleteProduct = deleteProduct;
+window.deleteUser = deleteUser;
+window.deleteOrder = deleteOrder;
+window.addToCartFromPage = addToCart;
+window.saveDealerProfile = async function saveDealerProfile() {};
+window.createPesticideProduct = async function createPesticideProduct() {};
+window.updatePesticideProduct = async function updatePesticideProduct() {};
+window.deletePesticideProduct = async function deletePesticideProduct() {};
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", () => {
+    initPage().catch((error) => console.error(error));
+  });
+} else {
+  initPage().catch((error) => console.error(error));
+}
