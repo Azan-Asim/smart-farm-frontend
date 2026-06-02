@@ -5,7 +5,7 @@ const getApiBase = () => {
   if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "") {
     return "http://localhost:5002";
   }
-  return window.location.origin;
+  return "https://sworn-nutmeg-deceiving.ngrok-free.dev";
 };
 const API_BASE = getApiBase().replace(/\/$/, "");
 const TOKEN_KEY = "token";
@@ -81,7 +81,11 @@ function clearSession() {
 }
 
 async function apiFetch(path, { method = "GET", auth = false, body, headers = {} } = {}) {
-  const requestHeaders = { Accept: "application/json", ...headers };
+  const requestHeaders = { 
+    Accept: "application/json", 
+    "ngrok-skip-browser-warning": "true",
+    ...headers 
+  };
   let requestBody = body;
 
   if (body !== undefined && body !== null && typeof body === "object" && !(body instanceof FormData)) {
