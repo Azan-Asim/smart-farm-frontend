@@ -3,7 +3,7 @@ const getApiBase = () => {
   if (localStorage.getItem("smartFarmApiBase")) return localStorage.getItem("smartFarmApiBase");
   const hostname = window.location.hostname;
   if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "") {
-    return "http://localhost:5001";
+    return "http://localhost:5002";
   }
   return window.location.origin;
 };
