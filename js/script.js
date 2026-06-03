@@ -166,9 +166,7 @@ function guessCategory(text = "") {
 
 function getFarmIdFromUrl() {
   const queryId = new URLSearchParams(window.location.search).get("id");
-  if (queryId) return Number(queryId);
-  const match = window.location.pathname.match(/farm(\d+)\.html$/i);
-  return match ? Number(match[1]) : null;
+  return queryId ? Number(queryId) : null;
 }
 
 function updateCartCount(remoteItems = null) {
